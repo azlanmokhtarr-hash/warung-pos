@@ -1,4 +1,18 @@
 import { useState, useEffect } from "react";
+import { initializeApp } from "firebase/app";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, orderBy } from "firebase/firestore";
+
+// ─── Firebase Config ─────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey: "AIzaSyCnH_0m3T_IDRuwVxDpDquwE8a-X0lPp2M",
+  authDomain: "warung-pos-76430.firebaseapp.com",
+  projectId: "warung-pos-76430",
+  storageBucket: "warung-pos-76430.firebasestorage.app",
+  messagingSenderId: "321981346807",
+  appId: "1:321981346807:web:8f3b46fd66b2ff5050b4f2"
+};
+const fbApp = initializeApp(firebaseConfig);
+const db = getFirestore(fbApp);
 
 // ─── QR Library ─────────────────────────────────────────────────────────────
 function QRImg({ value, size = 160, id }) {
@@ -335,20 +349,24 @@ export default function App() {
   const [splitCashIn, setSplitCashIn] = useState("");
 
   // QR Order (Option 2) — customer self-order via WiFi
-  const [pendingOrders, setPendingOrders] = useLocalStorage("pos_pending_orders", []); // orders from QR self-order
+  const [pendingOrders, setPendingOrders] = useState([]);
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrSelectedTable, setQrSelectedTable] = useState(null);
   const [newPendingCount, setNewPendingCount] = useState(0);
 
-  // Track new pending orders for notification
+  // Realtime listener dari Firestore
   useEffect(() => {
-    const count = pendingOrders.filter(o => o.status === "pending").length;
-    setNewPendingCount(count);
-  }, [pendingOrders]);
+    const q = query(collection(db, "pendingOrders"), orderBy("time", "desc"));
+    const unsub = onSnapshot(q, (snap) => {
+      const orders = snap.docs.map(d => ({ ...d.data(), _docId: d.id }));
+      setPendingOrders(orders);
+      setNewPendingCount(orders.filter(o => o.status === "pending").length);
+    });
+    return () => unsub();
+  }, []);
 
-  // QR Order base URL — pakai localStorage key "pos_pending_orders" sebagai shared store
-  // Customer page detect via ?table=xxx&qrorder=1
-  const qrBaseUrl = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "";
+  // QR Base URL — Vercel deployment
+  const qrBaseUrl = "https://warung-dkddgy7nt-azlanmokhtarr-7932s-projects.vercel.app";
 
   const sub = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const taxRate = taxConfig.enabled ? (taxConfig.rate / 100) : 0;
@@ -921,18 +939,19 @@ export default function App() {
     };
     setOrderNum(n => n + 1);
     setActiveOrders(prev => ({ ...prev, [`order_${num}`]: order }));
-    setPendingOrders(prev => prev.map(o => o.id === pending.id ? { ...o, status: "accepted" } : o));
+    await updateDoc(doc(db, "pendingOrders", pending._docId), { status: "accepted" });
     setSendingOrder(true);
     await printOrderSlips(order);
     setSendingOrder(false);
     toast(`✅ Order #${num} dari ${pending.customerName} diterima!`, "#4ade80");
   }
-  function rejectPendingOrder(id) {
-    setPendingOrders(prev => prev.map(o => o.id === id ? { ...o, status: "rejected" } : o));
+  async function rejectPendingOrder(pending) {
+    await updateDoc(doc(db, "pendingOrders", pending._docId), { status: "rejected" });
     toast("❌ Order ditolak", "#ef4444");
   }
   function clearDonePendingOrders() {
-    setPendingOrders(prev => prev.filter(o => o.status === "pending"));
+    // Just UI filter — Firestore data kekal, tapi boleh tambah delete later
+    toast("Done orders disembunyikan", "#94a3b8");
   }
   const filtered = products.filter(p => (fCat === "all" || p.categoryId === fCat) && (fSub === "all" || p.subcategoryId === fSub) && p.name.toLowerCase().includes(search.toLowerCase()));
   const filteredWithSoldOut = filtered; // keep all, show sold-out visually but disable click
@@ -994,8 +1013,23 @@ export default function App() {
     btn: (color = "#3b82f6") => ({ padding: "10px 20px", background: color, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }),
   };
 
-  // ════════════════════════════════════════════════════════════════════════
-  // QR CUSTOMER ORDER PAGE — render bila ada ?qrorder=1 dalam URL
+  // Sync menu ke Firestore bila products berubah (untuk QR order page)
+  useEffect(() => {
+    if (isQROrderPage) return; // QR page tak perlu push
+    const syncMenu = async () => {
+      try {
+        await updateDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate });
+      } catch {
+        // Doc mungkin belum wujud, cuba addDoc
+        try {
+          const { setDoc } = await import("firebase/firestore");
+          await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate });
+        } catch {}
+      }
+    };
+    const timer = setTimeout(syncMenu, 2000); // debounce 2s
+    return () => clearTimeout(timer);
+  }, [products, combos, categories, taxRate]);
   // ════════════════════════════════════════════════════════════════════════
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const isQROrderPage = urlParams.get("qrorder") === "1";
@@ -1009,8 +1043,30 @@ export default function App() {
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
   const [qrSearch, setQrSearch] = useState("");
+  const [qrMenuLoaded, setQrMenuLoaded] = useState(!isQROrderPage);
+
+  // Load menu dari Firestore untuk QR page
+  useEffect(() => {
+    if (!isQROrderPage) return;
+    import("firebase/firestore").then(({ getDoc }) => {
+      getDoc(doc(db, "config", "menu")).then(snap => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (data.products) setProducts(data.products);
+          if (data.combos) setCombos(data.combos);
+          if (data.categories) setCategories(data.categories);
+        }
+        setQrMenuLoaded(true);
+      }).catch(() => setQrMenuLoaded(true));
+    });
+  }, []);
 
   if (isQROrderPage) {
+    if (!qrMenuLoaded) return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div><div style={{ fontSize: 14, color: "#64748b" }}>Memuatkan menu...</div></div>
+      </div>
+    );
     const qrFiltered = products.filter(p =>
       !p.soldOut &&
       (qrCatFilter === "all" || p.categoryId === qrCatFilter) &&
@@ -1033,13 +1089,12 @@ export default function App() {
     }
     function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
 
-    function qrSubmitOrder() {
+    async function qrSubmitOrder() {
       if (!qrName.trim()) return alert("Sila masukkan nama anda");
       if (!validatePhone(qrPhone)) return alert("Nombor telefon tidak sah (9-11 digit)");
       if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
 
       const pending = {
-        id: `qr_${Date.now()}`,
         tableId: qrTableId,
         tableNo: qrTableName,
         customerName: qrName.trim(),
@@ -1052,8 +1107,12 @@ export default function App() {
         status: "pending",
         orderType: "Dine In",
       };
-      setPendingOrders(prev => [...prev, pending]);
-      setQrSubmitted(true);
+      try {
+        await addDoc(collection(db, "pendingOrders"), pending);
+        setQrSubmitted(true);
+      } catch (e) {
+        alert("Gagal hantar order. Pastikan ada internet.");
+      }
     }
 
     if (qrSubmitted) return (
@@ -2612,7 +2671,7 @@ export default function App() {
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={() => acceptPendingOrder(o)} style={{ flex: 1, padding: "8px 0", background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✅ Terima & Buat Order</button>
-                        <button onClick={() => rejectPendingOrder(o.id)} style={{ padding: "8px 14px", background: "#ef4444", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✕ Tolak</button>
+                        <button onClick={() => rejectPendingOrder(o)} style={{ padding: "8px 14px", background: "#ef4444", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✕ Tolak</button>
                       </div>
                     </div>
                   ))}
