@@ -21,6 +21,7 @@
     "capacitor-tcp-socket": "^7.1.0",
     "cordova-plugin-bluetooth-serial": "^0.4.7",
     "escpos": "^3.0.0-alpha.6",
+    "firebase": "^12.13.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
