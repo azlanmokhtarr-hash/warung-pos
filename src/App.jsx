@@ -366,7 +366,7 @@ export default function App() {
   }, []);
 
   // QR Base URL — Vercel deployment
-  const qrBaseUrl = "https://warung-dkddgy7nt-azlanmokhtarr-7932s-projects.vercel.app";
+  const qrBaseUrl = "https://warung-pos-nine.vercel.app";
 
   const sub = cart.reduce((s, i) => s + i.price * i.qty, 0);
   const taxRate = taxConfig.enabled ? (taxConfig.rate / 100) : 0;
