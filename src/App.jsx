@@ -1,0 +1,2822 @@
+import { useState, useEffect } from "react";
+
+// ─── QR Library ─────────────────────────────────────────────────────────────
+function QRImg({ value, size = 160, id }) {
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}&bgcolor=ffffff&color=0a0e1a&margin=10`;
+  return <img id={id} src={url} alt="QR" style={{ width: size, height: size, borderRadius: 8, border: "3px solid #f59e0b" }} crossOrigin="anonymous" />;
+}
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+const DEFAULT_CATEGORIES = [
+  { id: "cat1", name: "Makanan", subcategories: [{ id: "sub1", name: "Nasi" }, { id: "sub2", name: "Mee" }, { id: "sub3", name: "Roti" }] },
+  { id: "cat2", name: "Minuman", subcategories: [{ id: "sub4", name: "Panas" }, { id: "sub5", name: "Sejuk" }] },
+  { id: "cat3", name: "Dessert", subcategories: [{ id: "sub6", name: "Ais" }, { id: "sub7", name: "Kuih" }] },
+];
+
+const DEFAULT_PRODUCTS = [
+  { id: 1, name: "Nasi Lemak", price: 5.50, categoryId: "cat1", subcategoryId: "sub1", emoji: "🍚", printerId: "" },
+  { id: 2, name: "Mee Goreng", price: 6.00, categoryId: "cat1", subcategoryId: "sub2", emoji: "🍜", printerId: "" },
+  { id: 3, name: "Roti Canai", price: 2.50, categoryId: "cat1", subcategoryId: "sub3", emoji: "🫓", printerId: "" },
+  { id: 4, name: "Char Kuey Teow", price: 7.00, categoryId: "cat1", subcategoryId: "sub2", emoji: "🍳", printerId: "" },
+  { id: 5, name: "Ayam Goreng", price: 8.00, categoryId: "cat1", subcategoryId: "sub1", emoji: "🍗", printerId: "" },
+  { id: 6, name: "Satay (10pcs)", price: 9.00, categoryId: "cat1", subcategoryId: "sub1", emoji: "🍢", printerId: "" },
+  { id: 7, name: "Teh Tarik", price: 2.50, categoryId: "cat2", subcategoryId: "sub4", emoji: "🧋", printerId: "" },
+  { id: 8, name: "Kopi O", price: 2.00, categoryId: "cat2", subcategoryId: "sub4", emoji: "☕", printerId: "" },
+  { id: 9, name: "Air Kosong", price: 1.50, categoryId: "cat2", subcategoryId: "sub5", emoji: "💧", printerId: "" },
+  { id: 10, name: "Teh Ais", price: 2.50, categoryId: "cat2", subcategoryId: "sub5", emoji: "🥤", printerId: "" },
+  { id: 11, name: "Jus Oren", price: 4.00, categoryId: "cat2", subcategoryId: "sub5", emoji: "🍊", printerId: "" },
+  { id: 12, name: "Sirap Bandung", price: 3.00, categoryId: "cat2", subcategoryId: "sub5", emoji: "🌸", printerId: "" },
+  { id: 13, name: "Cendol", price: 4.50, categoryId: "cat3", subcategoryId: "sub6", emoji: "🍧", printerId: "" },
+  { id: 14, name: "Ice Kacang", price: 5.00, categoryId: "cat3", subcategoryId: "sub6", emoji: "🧊", printerId: "" },
+  { id: 15, name: "Kuih Lapis", price: 2.00, categoryId: "cat3", subcategoryId: "sub7", emoji: "🍰", printerId: "" },
+];
+
+const DEFAULT_COMBOS = [
+  { id: "combo1", name: "Set Nasi A", emoji: "🍱", price: 9.00, categoryId: "cat1", items: [{ productId: 1, qty: 1, printerId: "" }, { productId: 7, qty: 1, printerId: "" }], printerId: "", description: "Nasi Lemak + Teh Tarik" },
+  { id: "combo2", name: "Set Sarapan", emoji: "🌅", price: 7.00, categoryId: "cat1", items: [{ productId: 3, qty: 2, printerId: "" }, { productId: 8, qty: 1, printerId: "" }], printerId: "", description: "2x Roti Canai + Kopi O" },
+];
+
+const DEFAULT_TABLES = [
+  { id: "t1", name: "Meja 1", section: "Dalam" },
+  { id: "t2", name: "Meja 2", section: "Dalam" },
+  { id: "t3", name: "Meja 3", section: "Dalam" },
+  { id: "t4", name: "Meja 4", section: "Dalam" },
+  { id: "t5", name: "Meja 5", section: "Luar" },
+  { id: "t6", name: "Meja 6", section: "Luar" },
+  { id: "t7", name: "Meja 7", section: "Luar" },
+  { id: "t8", name: "Meja 8", section: "Luar" },
+];
+
+const EMOJIS = ["🍚","🍜","🫓","🍳","🍗","🍢","🧋","☕","💧","🥤","🍊","🌸","🍧","🧊","🍰","🥗","🍱","🌮","🍕","🍔","🥩","🍣","🍛","🥘","🍲","🧆","🥚","🍞","🧁","🍩","🍦","🍮","🍫","🍬","🧃","🥛","🍵","🍺","🥂","🌅","🎁","⭐","🔥","💫"];
+
+const ORDER_TYPES = [
+  { id: "dinein", label: "Dine In", emoji: "🍽️", color: "#3b82f6" },
+  { id: "takeaway", label: "Takeaway", emoji: "🥡", color: "#f59e0b" },
+  { id: "delivery", label: "Delivery", emoji: "🛵", color: "#10b981" },
+];
+
+function formatRM(a) { return `RM ${Number(a).toFixed(2)}`; }
+function fmtTime(d) { return new Date(d).toLocaleTimeString("ms-MY", { hour: "2-digit", minute: "2-digit" }); }
+function fmtDate(d) { return new Date(d).toLocaleDateString("ms-MY", { day: "2-digit", month: "short", year: "numeric" }); }
+
+function useLocalStorage(key, def) {
+  const [v, sv] = useState(() => { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : def; } catch { return def; } });
+  useEffect(() => { try { localStorage.setItem(key, JSON.stringify(v)); } catch {} }, [key, v]);
+  return [v, sv];
+}
+
+// ─── ESC/POS Builders ────────────────────────────────────────────────────────
+// printerWidth: "58" = 32 chars, "80" = 48 chars
+function getPrintWidth(printerWidth) { return printerWidth === "80" ? 48 : 32; }
+
+function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58") {
+  const { shopName = "WARUNG DIGITAL", phone = "03-1234 5678", address = "", footer = "Terima Kasih! Sila Datang Lagi" } = receiptConfig;
+  const ESC = 0x1B, GS = 0x1D;
+  const W = getPrintWidth(printerWidth);
+  const enc = new TextEncoder();
+  const bytes = [];
+  const add = (t) => bytes.push(...enc.encode(t + "\n"));
+  bytes.push(ESC, 0x40);
+  bytes.push(ESC, 0x61, 0x01);
+  add(shopName);
+  if (phone) add(phone);
+  if (address) add(address);
+  bytes.push(ESC, 0x61, 0x00);
+  add("-".repeat(W));
+  add(`No: #${order.num}  ${new Date(order.time).toLocaleString("ms-MY")}`);
+  if (order.tableNo) add(`Meja: ${order.tableNo}`);
+  if (order.orderType) add(`Jenis: ${order.orderType}`);
+  add("-".repeat(W));
+  order.cart.forEach(i => {
+    const nm = i.isCombo ? `[SET] ${i.name}` : i.name;
+    const l = `${nm} x${i.qty}`, r = formatRM(i.price * i.qty);
+    add(l + " ".repeat(Math.max(1, W - l.length - r.length)) + r);
+  });
+  add("-".repeat(W));
+  const padW = W - 8;
+  add(`${"Subtotal".padEnd(padW)}${formatRM(order.subtotal)}`);
+  add(`${"SST (6%)".padEnd(padW)}${formatRM(order.tax)}`);
+  bytes.push(ESC, 0x45, 0x01);
+  add(`${"JUMLAH".padEnd(padW)}${formatRM(order.total)}`);
+  bytes.push(ESC, 0x45, 0x00);
+  if (order.method === "cash") {
+    add(`${"Tunai".padEnd(padW)}${formatRM(order.cash)}`);
+    add(`${"Baki".padEnd(padW)}${formatRM(order.change)}`);
+  }
+  add("-".repeat(W));
+  bytes.push(ESC, 0x61, 0x01);
+  add(footer || "Terima Kasih! Sila Datang Lagi");
+  bytes.push(ESC, 0x61, 0x00);
+  bytes.push(GS, 0x56, 0x41, 0x10);
+  return new Uint8Array(bytes);
+}
+
+function buildOrderSlipBytes(order, printerName, items, showPrice = false, printerWidth = "58") {
+  const ESC = 0x1B, GS = 0x1D;
+  const W = getPrintWidth(printerWidth);
+  const enc = new TextEncoder();
+  const bytes = [];
+  const add = (t) => bytes.push(...enc.encode(t + "\n"));
+  bytes.push(ESC, 0x40);
+  bytes.push(ESC, 0x61, 0x01);
+  bytes.push(ESC, 0x45, 0x01);
+  add("*** ORDER SLIP ***");
+  bytes.push(ESC, 0x45, 0x00);
+  add(printerName.toUpperCase());
+  bytes.push(ESC, 0x61, 0x00);
+  add("-".repeat(W));
+  add(`Order #${order.num}  ${fmtTime(order.time)}`);
+  if (order.tableNo) add(`Meja: ${order.tableNo}`);
+  if (order.orderType) add(`Jenis: ${order.orderType}`);
+  add("-".repeat(W));
+  items.forEach(i => {
+    bytes.push(ESC, 0x45, 0x01);
+    if (showPrice) {
+      const l = `${i.name} x${i.qty}`, r = formatRM(i.price * i.qty);
+      add(l + " ".repeat(Math.max(1, W - l.length - r.length)) + r);
+    } else {
+      add(`${i.name} x${i.qty}`);
+    }
+    bytes.push(ESC, 0x45, 0x00);
+    // Item dalam set — print bawah nama set (bukan tepi)
+    if (i.isCombo && i.comboItems) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
+    if (i.notes) add(`  >> ${i.notes}`);
+  });
+  add("-".repeat(W));
+  if (showPrice) {
+    const padW = W - 8;
+    add(`${"JUMLAH".padEnd(padW)}${formatRM(items.reduce((s, i) => s + i.price * i.qty, 0))}`);
+    add("-".repeat(W));
+  }
+  bytes.push(ESC, 0x61, 0x01);
+  add("SEDIA");
+  bytes.push(GS, 0x56, 0x41, 0x10);
+  return new Uint8Array(bytes);
+}
+
+// ─── Printer functions ───────────────────────────────────────────────────────
+async function printBluetoothClassic(address, data) {
+  try {
+    const bt = window.bluetoothSerial;
+    if (!bt) throw new Error("Plugin tidak tersedia");
+    return new Promise((resolve) => {
+      bt.connect(address, () => {
+        bt.write(String.fromCharCode(...data), () => { bt.disconnect(); resolve({ ok: true }); }, (e) => { bt.disconnect(); resolve({ ok: false, err: e }); });
+      }, (e) => resolve({ ok: false, err: e }));
+    });
+  } catch (e) { return { ok: false, err: e.message }; }
+}
+
+async function printBluetoothBLE(deviceId, data) {
+  try {
+    const { BleClient } = await import("@capacitor-community/bluetooth-le");
+    await BleClient.initialize();
+    const SVC = "000018f0-0000-1000-8000-00805f9b34fb";
+    const CHR = "00002af1-0000-1000-8000-00805f9b34fb";
+    await BleClient.connect(deviceId);
+    for (let i = 0; i < data.length; i += 512) await BleClient.write(deviceId, SVC, CHR, new DataView(data.slice(i, i + 512).buffer));
+    await BleClient.disconnect(deviceId);
+    return { ok: true };
+  } catch (e) { return { ok: false, err: e.message }; }
+}
+
+async function printWifi(ip, port = 9100, data) {
+  try {
+    // Guna native TcpPrinterPlugin Java yang kita buat
+    const TcpPrinter = window.Capacitor?.Plugins?.TcpPrinter;
+    if (TcpPrinter) {
+      const b64 = btoa(String.fromCharCode(...data));
+      const result = await TcpPrinter.print({ ip, port, data: b64 });
+      return { ok: true };
+    }
+    // Fallback XMLHttpRequest
+    return new Promise((resolve) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", `http://${ip}:${port}`, true);
+      xhr.overrideMimeType("application/octet-stream");
+      xhr.timeout = 10000;
+      xhr.onload = () => resolve({ ok: true });
+      xhr.onerror = () => resolve({ ok: false, err: "Connection failed" });
+      xhr.ontimeout = () => resolve({ ok: false, err: "Timeout" });
+      xhr.send(data);
+    });
+  } catch (e) { return { ok: false, err: e.message }; }
+}
+
+async function scanBTClassic() {
+  return new Promise((resolve) => {
+    const bt = window.bluetoothSerial;
+    if (!bt) { resolve([]); return; }
+    bt.list((d) => resolve(d.map(x => ({ deviceId: x.address, name: x.name || x.address }))), () => resolve([]));
+  });
+}
+
+async function scanBTBLE() {
+  try {
+    const { BleClient } = await import("@capacitor-community/bluetooth-le");
+    await BleClient.initialize();
+    const devs = [];
+    await BleClient.requestLEScan({}, r => { if (!devs.find(d => d.deviceId === r.device.deviceId)) devs.push({ deviceId: r.device.deviceId, name: r.device.name || "Unknown" }); });
+    setTimeout(() => BleClient.stopLEScan(), 5000);
+    return devs;
+  } catch { return []; }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// MAIN APP
+// ════════════════════════════════════════════════════════════════════════════
+export default function App() {
+  const [products, setProducts] = useLocalStorage("pos_products", DEFAULT_PRODUCTS);
+  const [categories, setCategories] = useLocalStorage("pos_categories", DEFAULT_CATEGORIES);
+  const [combos, setCombos] = useLocalStorage("pos_combos", DEFAULT_COMBOS);
+  const [printers, setPrinters] = useLocalStorage("pos_printers", []);
+  const [tables, setTables] = useLocalStorage("pos_tables", DEFAULT_TABLES);
+  const [activeOrders, setActiveOrders] = useLocalStorage("pos_active_orders", {}); // { tableId: order }
+  const [salesHistory, setSalesHistory] = useLocalStorage("pos_history", []);
+  const [orderNum, setOrderNum] = useLocalStorage("pos_ordernum", 1042);
+  const [taxConfig, setTaxConfig] = useLocalStorage("pos_tax_config", { enabled: true, rate: 6, label: "SST" });
+  const [receiptConfig, setReceiptConfig] = useLocalStorage("pos_receipt_config", { shopName: "WARUNG DIGITAL", phone: "03-1234 5678", address: "", footer: "Terima Kasih! Sila Datang Lagi", logoBase64: "" });
+
+  // App state
+  const [page, setPage] = useState("tables");
+  const [notif, setNotif] = useState(null);
+  const [notifClr, setNotifClr] = useState("#93c5fd");
+  const [printSt, setPrintSt] = useState({});
+  const [sendingOrder, setSendingOrder] = useState(false);
+
+  // Order creation flow
+  const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+  const [showTableModal, setShowTableModal] = useState(false);
+  const [currentOrderType, setCurrentOrderType] = useState(null);
+  const [currentTable, setCurrentTable] = useState(null);
+  const [cart, setCart] = useState([]);
+  const [fCat, setFCat] = useState("all");
+  const [fSub, setFSub] = useState("all");
+  const [search, setSearch] = useState("");
+  const [showCombos, setShowCombos] = useState(false);
+
+  // Table view
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [showPayModal, setShowPayModal] = useState(false);
+  const [payMethod, setPayMethod] = useState("cash");
+  const [cashIn, setCashIn] = useState("");
+  const [showReceiptModal, setShowReceiptModal] = useState(false);
+  const [lastOrder, setLastOrder] = useState(null);
+
+  // Settings modals
+  const [itemModal, setItemModal] = useState(false);
+  const [editItem, setEditItem] = useState(null);
+  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [] });
+  const [variantModal, setVariantModal] = useState(false);
+  const [variantItem, setVariantItem] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [emojiPick, setEmojiPick] = useState(false);
+  const [catModal, setCatModal] = useState(false);
+  const [subModal, setSubModal] = useState(false);
+  const [editCat, setEditCat] = useState(null);
+  const [editSub, setEditSub] = useState(null);
+  const [catF, setCatF] = useState({ name: "" });
+  const [subF, setSubF] = useState({ name: "", catId: "" });
+  const [printerModal, setPrinterModal] = useState(false);
+  const [editPrinter, setEditPrinter] = useState(null);
+  const [pF, setPF] = useState({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false });
+  const [btDevs, setBtDevs] = useState([]);
+  const [scanning, setScanning] = useState(false);
+  const [comboModal, setComboModal] = useState(false);
+  const [editCombo, setEditCombo] = useState(null);
+  const [comboF, setComboF] = useState({ name: "", emoji: "🍱", price: "", categoryId: "cat1", description: "", printerId: "", items: [], customItems: [] });
+  const [emojiPickCombo, setEmojiPickCombo] = useState(false);
+  const [comboItemCatFilter, setComboItemCatFilter] = useState("all");
+  const [comboDropdownVal, setComboDropdownVal] = useState("");
+  const [showCustomItemForm, setShowCustomItemForm] = useState(false);
+  const [customItemF, setCustomItemF] = useState({ name: "", printerId: "", qty: "1" });
+  const [tableSetupModal, setTableSetupModal] = useState(false);
+  const [tableF, setTableF] = useState({ name: "", section: "Dalam" });
+  const [editTable, setEditTable] = useState(null);
+  const [histDetail, setHistDetail] = useState(null);
+  const [histFilter, setHistFilter] = useState("all");
+  const [histDateFilter, setHistDateFilter] = useState(""); // YYYY-MM-DD
+  const [settingsTab, setSettingsTab] = useState("menu"); // menu | printers | categories | tables
+  const [salesFilter, setSalesFilter] = useState("week");
+  const [salesPickDate, setSalesPickDate] = useState("");
+  const [salesPickMonth, setSalesPickMonth] = useState("");
+  const [salesPickYear, setSalesPickYear] = useState("");
+  const [salesPrintItems, setSalesPrintItems] = useState(false);
+  const [salesPrintModal, setSalesPrintModal] = useState(false);
+
+  // Shift / Opening / Closing
+  const [currentShift, setCurrentShift] = useLocalStorage("pos_current_shift", null); // { id, name, openTime, openFloat, orders:[] }
+  const [shiftHistory, setShiftHistory] = useLocalStorage("pos_shift_history", []);
+  const [shiftModal, setShiftModal] = useState(false); // open shift modal
+  const [closeShiftModal, setCloseShiftModal] = useState(false);
+  const [shiftF, setShiftF] = useState({ name: "", float: "" }); // open shift form
+  const [closeF, setCloseF] = useState({ actualCash: "" }); // close shift form
+
+  // Import/Export menu
+  const [importModal, setImportModal] = useState(false);
+
+  // Merge order
+  const [mergeMode, setMergeMode] = useState(false);
+  const [mergeSourceKey, setMergeSourceKey] = useState(null); // key in activeOrders
+
+  // Edit order modal — draft state (not saved until "Selesai Edit")
+  const [editOrderKey, setEditOrderKey] = useState(null); // key in activeOrders
+  const [editOrderDraft, setEditOrderDraft] = useState(null); // draft cart, not committed yet
+  const [editOrderNewItems, setEditOrderNewItems] = useState([]); // track newly added items for auto-print
+  const [editOrderCat, setEditOrderCat] = useState("all");
+  const [editOrderSearch, setEditOrderSearch] = useState("");
+  const [editOrderShowCombos, setEditOrderShowCombos] = useState(false);
+
+  // Split bill
+  const [splitMode, setSplitMode] = useState(false);
+  const [splitOrderKey, setSplitOrderKey] = useState(null);
+  const [splitSelected, setSplitSelected] = useState({}); // { _key: qty }
+  const [splitPayMethod, setSplitPayMethod] = useState("cash");
+  const [splitCashIn, setSplitCashIn] = useState("");
+
+  // QR Order (Option 2) — customer self-order via WiFi
+  const [pendingOrders, setPendingOrders] = useLocalStorage("pos_pending_orders", []); // orders from QR self-order
+  const [showQRModal, setShowQRModal] = useState(false);
+  const [qrSelectedTable, setQrSelectedTable] = useState(null);
+  const [newPendingCount, setNewPendingCount] = useState(0);
+
+  // Track new pending orders for notification
+  useEffect(() => {
+    const count = pendingOrders.filter(o => o.status === "pending").length;
+    setNewPendingCount(count);
+  }, [pendingOrders]);
+
+  // QR Order base URL — pakai localStorage key "pos_pending_orders" sebagai shared store
+  // Customer page detect via ?table=xxx&qrorder=1
+  const qrBaseUrl = typeof window !== "undefined" ? `${window.location.origin}${window.location.pathname}` : "";
+
+  const sub = cart.reduce((s, i) => s + i.price * i.qty, 0);
+  const taxRate = taxConfig.enabled ? (taxConfig.rate / 100) : 0;
+  const tax = sub * taxRate;
+  const total = sub + tax;
+
+  function toast(msg, clr = "#93c5fd") { setNotif(msg); setNotifClr(clr); setTimeout(() => setNotif(null), 2500); }
+
+  // ── Print functions ──────────────────────────────────────────────────────
+  async function doPrint(printer, data) {
+    setPrintSt(s => ({ ...s, [printer.id]: "⏳" }));
+    let r;
+    if (printer.type === "bluetooth") {
+      r = printer.btType === "ble" ? await printBluetoothBLE(printer.deviceId, data) : await printBluetoothClassic(printer.deviceId, data);
+    } else {
+      r = await printWifi(printer.ip, parseInt(printer.port) || 9100, data);
+    }
+    setPrintSt(s => ({ ...s, [printer.id]: r.ok ? "✅" : "❌" }));
+    toast(r.ok ? `🖨️ ${printer.name} OK!` : `❌ ${printer.name}: ${r.err}`, r.ok ? "#4ade80" : "#f87171");
+    setTimeout(() => setPrintSt(s => { const n = { ...s }; delete n[printer.id]; return n; }), 4000);
+  }
+
+  // Print order slips to kitchen/bar printers (NO receipt)
+  async function printOrderSlips(order) {
+    const groups = {};
+
+    order.cart.forEach(item => {
+      if (item.isCombo && item.comboItems) {
+        const comboPid = item.printerId || "";
+        // Kumpul semua printer unique dari SEMUA sub-items (termasuk custom)
+        const allSubItems = item.comboItems || [];
+        const subPrinters = [...new Set(allSubItems.map(ci => ci.printerId || "").filter(Boolean))];
+
+        if (subPrinters.length > 0) {
+          subPrinters.forEach(pid => {
+            if (!groups[pid]) groups[pid] = [];
+            const subItems = allSubItems.filter(ci => (ci.printerId || "") === pid);
+            if (subItems.length === 0) return;
+            // Check kalau printer ni dah ada entry untuk combo yang sama
+            const existing = groups[pid].find(g => g._key === item._key && g.isCombo);
+            if (existing) {
+              // Merge subItems ke existing entry
+              existing.comboItems = [...(existing.comboItems || []), ...subItems];
+            } else {
+              groups[pid].push({ ...item, isCombo: true, comboItems: subItems });
+            }
+          });
+          // Kalau ada sub-items yang takde printer assign, hantar ke combo printer
+          const unassigned = allSubItems.filter(ci => !ci.printerId);
+          if (unassigned.length > 0 && comboPid) {
+            if (!groups[comboPid]) groups[comboPid] = [];
+            groups[comboPid].push({ ...item, isCombo: true, comboItems: unassigned });
+          }
+        } else if (comboPid) {
+          // Semua items takde printer — hantar semua ke combo printer
+          if (!groups[comboPid]) groups[comboPid] = [];
+          groups[comboPid].push({ ...item });
+        }
+      } else {
+        const pid = item.printerId || "";
+        if (!pid) return;
+        if (!groups[pid]) groups[pid] = [];
+        groups[pid].push(item);
+      }
+    });
+
+    if (Object.keys(groups).length === 0) {
+      const kitchenPrinter = printers.find(p => p.role !== "cashier");
+      if (kitchenPrinter) groups[kitchenPrinter.id] = order.cart;
+    }
+
+    for (const [pid, items] of Object.entries(groups)) {
+      let printer = printers.find(p => p.id === pid);
+      if (!printer && printers.length > 0) printer = printers[0];
+      if (!printer) continue;
+
+      const slipData = buildOrderSlipBytes(
+        order,
+        printer.location || printer.name,
+        items,
+        printer.showPrice || false,
+        printer.printerWidth || "58"
+      );
+
+      await doPrint(printer, slipData);
+      await new Promise(res => setTimeout(res, 1200));
+    }
+  }
+
+  // Print receipt (cashier only)
+  async function printReceipt(order) {
+    const cashierPrinters = printers.filter(p => p.role === "cashier" || !p.role);
+    if (cashierPrinters.length === 0 && printers.length > 0) {
+      await doPrint(printers[0], buildReceiptBytes(order, receiptConfig, printers[0].printerWidth || "58"));
+    } else {
+      for (const p of cashierPrinters) await doPrint(p, buildReceiptBytes(order, receiptConfig, p.printerWidth || "58"));
+    }
+  }
+
+  // ── Shift ────────────────────────────────────────────────────────────────
+  function openShift() {
+    if (!shiftF.name.trim()) return toast("⚠️ Masukkan nama shift", "#f59e0b");
+    const float = parseFloat(shiftF.float) || 0;
+    const shift = { id: `shift_${Date.now()}`, name: shiftF.name.trim(), openTime: new Date().toISOString(), openFloat: float, orders: [] };
+    setCurrentShift(shift);
+    setShiftModal(false);
+    setShiftF({ name: "", float: "" });
+    toast(`✅ Shift "${shift.name}" dibuka`, "#22c55e");
+  }
+
+  function closeShift() {
+    if (!currentShift) return;
+    const actualCash = parseFloat(closeF.actualCash) || 0;
+    // Kira dari history yang dalam shift ni
+    const shiftOrders = salesHistory.filter(o => currentShift.orders.includes(o.num));
+    const cashSales = shiftOrders.filter(o => o.method === "cash").reduce((s, o) => s + o.total, 0);
+    const qrSales = shiftOrders.filter(o => o.method === "qr").reduce((s, o) => s + o.total, 0);
+    const cardSales = shiftOrders.filter(o => o.method === "card").reduce((s, o) => s + o.total, 0);
+    const totalSales = cashSales + qrSales + cardSales;
+    const expectedCash = currentShift.openFloat + cashSales;
+    const diff = actualCash - expectedCash;
+    const closed = { ...currentShift, closeTime: new Date().toISOString(), actualCash, cashSales, qrSales, cardSales, totalSales, expectedCash, diff, orderCount: shiftOrders.length };
+    setShiftHistory(h => [closed, ...h]);
+    setCurrentShift(null);
+    setCloseShiftModal(false);
+    setCloseF({ actualCash: "" });
+    toast(`✅ Shift "${closed.name}" ditutup`, "#22c55e");
+    // Auto print report
+    printShiftReport(closed, true);
+  }
+
+  async function printShiftReport(shift, autoPrint = false) {
+    const cashierP = printers.find(p => p.role === "cashier" || !p.role);
+    if (!cashierP && !autoPrint) return toast("⚠️ Tiada printer cashier", "#f59e0b");
+    if (!cashierP) return;
+    const ESC = 0x1B, GS = 0x1D;
+    const W = getPrintWidth(cashierP?.printerWidth || "58");
+    const enc = new TextEncoder();
+    const bytes = [];
+    const add = (t) => bytes.push(...enc.encode(t + "\n"));
+    const pad = (l, r) => l + " ".repeat(Math.max(1, W - l.length - r.length)) + r;
+    bytes.push(ESC, 0x40, ESC, 0x61, 0x01, ESC, 0x45, 0x01);
+    add(receiptConfig.shopName || "WARUNG DIGITAL");
+    add("LAPORAN PENUTUPAN SHIFT");
+    bytes.push(ESC, 0x45, 0x00);
+    add("-".repeat(W));
+    bytes.push(ESC, 0x61, 0x00);
+    add(`Shift: ${shift.name}`);
+    add(`Buka: ${new Date(shift.openTime).toLocaleString("ms-MY")}`);
+    add(`Tutup: ${new Date(shift.closeTime).toLocaleString("ms-MY")}`);
+    add(`Bil. Order: ${shift.orderCount}`);
+    add("-".repeat(W));
+    add(pad("Float Pembuka:", formatRM(shift.openFloat)));
+    add("-".repeat(W));
+    bytes.push(ESC, 0x45, 0x01);
+    add("JUALAN MENGIKUT CARA BAYAR:");
+    bytes.push(ESC, 0x45, 0x00);
+    add(pad("Tunai (Cash):", formatRM(shift.cashSales)));
+    add(pad("QR Pay:", formatRM(shift.qrSales)));
+    add(pad("Kad (Card):", formatRM(shift.cardSales)));
+    add("-".repeat(W));
+    bytes.push(ESC, 0x45, 0x01);
+    add(pad("JUMLAH JUALAN:", formatRM(shift.totalSales)));
+    bytes.push(ESC, 0x45, 0x00);
+    add("-".repeat(W));
+    add(pad("Dijangka (Cash):", formatRM(shift.expectedCash)));
+    add(pad("Sebenar (Cash):", formatRM(shift.actualCash)));
+    bytes.push(ESC, 0x45, 0x01);
+    const diffLabel = shift.diff >= 0 ? `LEBIH: +${formatRM(shift.diff)}` : `KURANG: ${formatRM(shift.diff)}`;
+    add(pad("Selisih:", shift.diff === 0 ? "RM 0.00 ✓" : diffLabel));
+    bytes.push(ESC, 0x45, 0x00);
+    add("-".repeat(W));
+    bytes.push(ESC, 0x61, 0x01);
+    add("Terima Kasih!");
+    bytes.push(GS, 0x56, 0x41, 0x10);
+    await doPrint(cashierP, new Uint8Array(bytes));
+  }
+
+  // ── Import / Export Menu ─────────────────────────────────────────────────
+  async function exportMenuCSV() {
+    const header = "Nama,Harga,Kategori,Sub-Kategori,Emoji,Printer ID";
+    const rows = products.map(p => {
+      const cat = categories.find(c => c.id === p.categoryId);
+      const sub = cat?.subcategories?.find(s => s.id === p.subcategoryId);
+      return [p.name, p.price, cat?.name || "", sub?.name || "", p.emoji || "", p.printerId || ""].map(v => `"${v}"`).join(",");
+    });
+    const csv = [header, ...rows].join("\n");
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const { Share } = await import("@capacitor/share");
+      const fileName = `menu-export-${new Date().toISOString().slice(0,10)}.csv`;
+      await Filesystem.writeFile({ path: fileName, data: btoa(unescape(encodeURIComponent(csv))), directory: Directory.Cache });
+      const fileUri = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
+      await Share.share({ title: "Export Menu", url: fileUri.uri, dialogTitle: "Simpan atau share menu CSV" });
+    } catch {
+      // Fallback untuk browser
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "menu-export.csv"; a.click();
+      URL.revokeObjectURL(url);
+    }
+    toast("✅ Menu dieksport!", "#22c55e");
+  }
+
+  async function downloadMenuTemplate() {
+    const header = "Nama,Harga,Kategori,Sub-Kategori,Emoji,Printer ID";
+    const example = [
+      '"Nasi Goreng","7.50","Makanan","Nasi","🍳",""',
+      '"Teh O Ais","2.00","Minuman","Sejuk","🧊",""',
+      '"Roti Bakar","3.00","Makanan","Roti","🍞",""',
+    ].join("\n");
+    const csv = [header, example].join("\n");
+    try {
+      const { Filesystem, Directory } = await import("@capacitor/filesystem");
+      const { Share } = await import("@capacitor/share");
+      await Filesystem.writeFile({ path: "template-menu.csv", data: btoa(unescape(encodeURIComponent(csv))), directory: Directory.Cache });
+      const fileUri = await Filesystem.getUri({ path: "template-menu.csv", directory: Directory.Cache });
+      await Share.share({ title: "Template Menu", url: fileUri.uri, dialogTitle: "Simpan template CSV" });
+    } catch {
+      const blob = new Blob([csv], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url; a.download = "template-menu.csv"; a.click();
+      URL.revokeObjectURL(url);
+    }
+    toast("✅ Template dimuat turun!", "#22c55e");
+  }
+
+  function importMenuCSV(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const text = e.target.result;
+        const lines = text.split("\n").slice(1).filter(l => l.trim());
+        let added = 0, skipped = 0;
+        const newProducts = [...products];
+        lines.forEach(line => {
+          const cols = line.split(",").map(c => c.replace(/^"|"$/g, "").trim());
+          const [name, price, catName, subName, emoji, printerId] = cols;
+          if (!name || !price) { skipped++; return; }
+          const cat = categories.find(c => c.name.toLowerCase() === catName.toLowerCase());
+          if (!cat) { skipped++; return; }
+          const sub = cat.subcategories?.find(s => s.name.toLowerCase() === subName.toLowerCase());
+          const exists = newProducts.find(p => p.name.toLowerCase() === name.toLowerCase());
+          if (exists) { skipped++; return; }
+          newProducts.push({ id: `prod_${Date.now()}_${added}`, name, price: parseFloat(price) || 0, categoryId: cat.id, subcategoryId: sub?.id || "", emoji: emoji || "🍽️", printerId: printerId || "", variants: [] });
+          added++;
+        });
+        setProducts(newProducts);
+        setImportModal(false);
+        toast(`✅ ${added} item ditambah, ${skipped} dilangkau`, "#22c55e");
+      } catch (err) {
+        toast("❌ Error baca file", "#ef4444");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  // ── Cart ─────────────────────────────────────────────────────────────────
+  function addCart(p, isCombo = false) {
+    // Kalau ada variants, tunjuk modal pilih varian dulu
+    if (!isCombo && p.variants && p.variants.length > 0) {
+      setVariantItem(p);
+      setSelectedVariant(null);
+      setVariantModal(true);
+      return;
+    }
+    addCartDirect(p, isCombo);
+  }
+
+  function addCartDirect(p, isCombo = false, variantOpt = null) {
+    const variantSuffix = variantOpt ? `_${variantOpt.name}` : "";
+    const key = isCombo ? `combo_${p.id}` : `item_${p.id}${variantSuffix}`;
+    const finalPrice = variantOpt ? (p.price + (variantOpt.extraPrice || 0)) : p.price;
+    const finalName = variantOpt ? `${p.name} (${variantOpt.name})` : p.name;
+    setCart(prev => {
+      const e = prev.find(i => i._key === key);
+      if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
+      if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: [
+        ...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+        ...(p.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+      ] }];
+      return [...prev, { _key: key, id: p.id, name: finalName, emoji: p.emoji, price: finalPrice, qty: 1, isCombo: false, printerId: p.printerId || "" }];
+    });
+    toast(`${p.emoji} ${finalName} ditambah`);
+  }
+
+  function updQty(key, d) { setCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
+
+  // ── Create Order ─────────────────────────────────────────────────────────
+  async function createOrder() {
+    if (cart.length === 0) return;
+    const num = orderNum;
+    const order = {
+      id: `order_${Date.now()}`,
+      num, cart: [...cart],
+      subtotal: sub, tax, total,
+      tableNo: currentTable?.name || "-",
+      tableId: currentTable?.id || null,
+      orderType: currentOrderType?.label || "Takeaway",
+      time: new Date(), status: "active",
+    };
+    setOrderNum(n => n + 1);
+
+    // Save to active orders — SENTIASA simpan ikut order.id (nombor order)
+    // Ini membolehkan meja sama ada banyak order serentak
+    const orderKey = `order_${num}`;
+    const orderWithKey = {
+      ...order,
+      orderKey, // key untuk identify dalam activeOrders
+      displayName: currentTable ? `${currentTable.name} (Order #${num})` : `Order #${num}`,
+    };
+    setActiveOrders(prev => ({ ...prev, [orderKey]: orderWithKey }));
+
+    // Show sending animation then print
+    setSendingOrder(true);
+    await printOrderSlips(order);
+    setSendingOrder(false);
+
+    toast(`✅ Order #${num} dibuat!`, "#4ade80");
+    setCart([]);
+    setPage("tables");
+    setCurrentTable(null);
+    setCurrentOrderType(null);
+  }
+
+  // ── Checkout / Pay ───────────────────────────────────────────────────────
+  async function checkout(order, printRec = true) {
+    const paidOrder = {
+      ...order,
+      method: payMethod,
+      cash: parseFloat(cashIn) || 0,
+      change: parseFloat(cashIn) - order.total,
+      status: "paid",
+      paidAt: new Date(),
+    };
+
+    // Remove from active orders — guna orderKey
+    const key = order.orderKey || order.id;
+    setActiveOrders(prev => { const n = { ...prev }; delete n[key]; return n; });
+
+    // Save to history
+    setSalesHistory(prev => [paidOrder, ...prev]);
+    setLastOrder(paidOrder);
+
+    // Record dalam shift semasa
+    if (currentShift) setCurrentShift(s => ({ ...s, orders: [...(s.orders || []), paidOrder.num] }));
+
+    // Print receipt if requested
+    if (printRec) await printReceipt(paidOrder);
+
+    setShowPayModal(false);
+    setShowReceiptModal(true);
+    setSelectedTable(null);
+    setCashIn("");
+    toast("✅ Bayaran berjaya!", "#4ade80");
+  }
+
+  // ── Settings CRUD ────────────────────────────────────────────────────────
+  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [] }); setItemModal(true); };
+  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [] }); setItemModal(true); };
+  const toggleSoldOut = (id) => {
+    setProducts(p => p.map(i => i.id === id ? { ...i, soldOut: !i.soldOut } : i));
+  };
+  const toggleComboSoldOut = (id) => {
+    setCombos(p => p.map(c => c.id === id ? { ...c, soldOut: !c.soldOut } : c));
+  };
+
+  const saveItem = () => {
+    if (!itemF.name || !itemF.price) return;
+    if (editItem) setProducts(p => p.map(i => i.id === editItem.id ? { ...i, ...itemF, price: parseFloat(itemF.price) } : i));
+    else setProducts(p => [...p, { id: Date.now(), ...itemF, price: parseFloat(itemF.price) }]);
+    toast(editItem ? "✅ Item dikemaskini" : "✅ Item ditambah"); setItemModal(false);
+  };
+  const delItem = (id) => { if (window.confirm("Padam item?")) { setProducts(p => p.filter(i => i.id !== id)); toast("🗑️ Dipadam"); } };
+
+  const openAddCat = () => { setEditCat(null); setCatF({ name: "" }); setCatModal(true); };
+  const openEditCat = (c) => { setEditCat(c); setCatF({ name: c.name }); setCatModal(true); };
+  const saveCat = () => { if (!catF.name) return; if (editCat) setCategories(p => p.map(c => c.id === editCat.id ? { ...c, name: catF.name } : c)); else setCategories(p => [...p, { id: `c${Date.now()}`, name: catF.name, subcategories: [] }]); toast("✅ Dikemaskini"); setCatModal(false); };
+  const delCat = (id) => { if (window.confirm("Padam kategori?")) { setCategories(p => p.filter(c => c.id !== id)); setProducts(p => p.filter(i => i.categoryId !== id)); toast("🗑️ Dipadam"); } };
+  const openAddSub = (catId) => { setEditSub(null); setSubF({ name: "", catId }); setSubModal(true); };
+  const openEditSub = (s, catId) => { setEditSub(s); setSubF({ name: s.name, catId }); setSubModal(true); };
+  const saveSub = () => { if (!subF.name) return; if (editSub) setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: c.subcategories.map(s => s.id === editSub.id ? { ...s, name: subF.name } : s) } : c)); else setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: [...c.subcategories, { id: `s${Date.now()}`, name: subF.name }] } : c)); toast("✅ Dikemaskini"); setSubModal(false); };
+  const delSub = (sId, cId) => { if (window.confirm("Padam sub?")) { setCategories(p => p.map(c => c.id === cId ? { ...c, subcategories: c.subcategories.filter(s => s.id !== sId) } : c)); toast("🗑️ Dipadam"); } };
+
+  const openAddPrinter = () => { setEditPrinter(null); setPF({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false, printerWidth: "58" }); setBtDevs([]); setPrinterModal(true); };
+  const openEditPrinter = (p) => { setEditPrinter(p); setPF({ name: p.name, type: p.type, btType: p.btType || "classic", ip: p.ip || "", port: p.port || "9100", deviceId: p.deviceId || "", location: p.location || "Kaunter", role: p.role || "cashier", showPrice: p.showPrice || false, printerWidth: p.printerWidth || "58" }); setPrinterModal(true); };
+  const savePrinter = () => { if (!pF.name) return; const d = { ...pF, id: editPrinter ? editPrinter.id : `pr${Date.now()}` }; if (editPrinter) setPrinters(p => p.map(i => i.id === editPrinter.id ? d : i)); else setPrinters(p => [...p, d]); toast("✅ Printer disimpan"); setPrinterModal(false); };
+  const delPrinter = (id) => { if (window.confirm("Padam printer?")) { setPrinters(p => p.filter(i => i.id !== id)); toast("🗑️ Dipadam"); } };
+  const doScan = async () => { setScanning(true); toast("📡 Scan..."); const d = await (pF.btType === "ble" ? scanBTBLE() : scanBTClassic()); setBtDevs(d); setScanning(false); toast(d.length ? `${d.length} device` : "Tiada device", d.length ? "#4ade80" : "#f87171"); };
+
+  const openAddCombo = () => { setEditCombo(null); setComboF({ name: "", emoji: "🍱", price: "", categoryId: categories[0]?.id || "cat1", description: "", printerId: "", items: [], customItems: [] }); setComboModal(true); };
+  const openEditCombo = (c) => { setEditCombo(c); setComboF({ name: c.name, emoji: c.emoji, price: c.price.toString(), categoryId: c.categoryId || "cat1", description: c.description || "", printerId: c.printerId || "", items: [...(c.items || [])], customItems: [...(c.customItems || [])] }); setComboModal(true); };
+  const saveCombo = () => { if (!comboF.name || !comboF.price) return; const d = { ...comboF, price: parseFloat(comboF.price), id: editCombo ? editCombo.id : `combo_${Date.now()}` }; if (editCombo) setCombos(p => p.map(c => c.id === editCombo.id ? d : c)); else setCombos(p => [...p, d]); toast("✅ Combo disimpan"); setComboModal(false); };
+  const delCombo = (id) => { if (window.confirm("Padam combo?")) { setCombos(p => p.filter(c => c.id !== id)); toast("🗑️ Dipadam"); } };
+  const addComboItem = (pid) => setComboF(f => { const e = f.items.find(i => i.productId === pid); if (e) return { ...f, items: f.items.map(i => i.productId === pid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...f.items, { productId: pid, qty: 1, printerId: "" }] }; });
+  const removeComboItem = (pid) => setComboF(f => ({ ...f, items: f.items.filter(i => i.productId !== pid) }));
+  const addCustomComboItem = () => {
+    if (!customItemF.name.trim()) return;
+    const newItem = { customId: `custom_${Date.now()}`, name: customItemF.name.trim(), qty: parseInt(customItemF.qty) || 1, printerId: customItemF.printerId || "", isCustom: true };
+    setComboF(f => ({ ...f, customItems: [...(f.customItems || []), newItem] }));
+    setCustomItemF({ name: "", printerId: "", qty: "1" });
+    setShowCustomItemForm(false);
+  };
+  const removeCustomComboItem = (customId) => setComboF(f => ({ ...f, customItems: (f.customItems || []).filter(i => i.customId !== customId) }));
+
+  const openAddTable = () => { setEditTable(null); setTableF({ name: "", section: "Dalam" }); setTableSetupModal(true); };
+  const openEditTable = (t) => { setEditTable(t); setTableF({ name: t.name, section: t.section }); setTableSetupModal(true); };
+  const saveTable = () => { if (!tableF.name) return; const d = { ...tableF, id: editTable ? editTable.id : `t${Date.now()}` }; if (editTable) setTables(p => p.map(t => t.id === editTable.id ? d : t)); else setTables(p => [...p, d]); toast("✅ Meja disimpan"); setTableSetupModal(false); };
+  const delTable = (id) => { if (window.confirm("Padam meja?")) { setTables(p => p.filter(t => t.id !== id)); toast("🗑️ Dipadam"); } };
+
+  // ── Merge Orders ─────────────────────────────────────────────────────────
+  function startMerge(sourceKey) { setMergeMode(true); setMergeSourceKey(sourceKey); toast("Pilih order nak digabungkan", "#f59e0b"); }
+  function doMerge(targetKey) {
+    if (targetKey === mergeSourceKey) { setMergeMode(false); setMergeSourceKey(null); return; }
+    const source = activeOrders[mergeSourceKey];
+    const target = activeOrders[targetKey];
+    if (!source || !target) return;
+    const mergedCart = [...target.cart];
+    source.cart.forEach(si => {
+      const ex = mergedCart.find(i => i._key === si._key);
+      if (ex) { ex.qty += si.qty; } else { mergedCart.push({ ...si }); }
+    });
+    const newSub = mergedCart.reduce((s, i) => s + i.price * i.qty, 0);
+    const newTax = newSub * taxRate;
+    const merged = { ...target, cart: mergedCart, subtotal: newSub, tax: newTax, total: newSub + newTax };
+    setActiveOrders(prev => { const n = { ...prev }; n[targetKey] = merged; delete n[mergeSourceKey]; return n; });
+    setMergeMode(false); setMergeSourceKey(null);
+    toast("✅ Order digabungkan!", "#4ade80");
+  }
+
+  // ── Edit Order (Draft — only committed on "Selesai Edit") ────────────────
+  function openEditOrder(key) {
+    const order = activeOrders[key];
+    if (!order) return;
+    setEditOrderKey(key);
+    setEditOrderDraft([...order.cart.map(i => ({ ...i }))]);
+    setEditOrderNewItems([]);
+    setEditOrderCat("all");
+    setEditOrderSearch("");
+    setEditOrderShowCombos(false);
+  }
+  function editOrderAddItem(p, isCombo = false) {
+    const key = isCombo ? `combo_${p.id}` : `item_${p.id}`;
+    const buildComboItems = (p) => [
+      ...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+      ...(p.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+    ];
+    setEditOrderDraft(prev => {
+      const draft = prev ? [...prev] : [];
+      const ex = draft.find(i => i._key === key);
+      if (ex) {
+        ex.qty += 1;
+        setEditOrderNewItems(ni => {
+          const n = [...ni]; const e2 = n.find(i => i._key === key);
+          if (e2) e2.qty += 1; else n.push({ _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo, printerId: p.printerId || "", comboItems: isCombo ? buildComboItems(p) : undefined });
+          return n;
+        });
+      } else {
+        const newItem = isCombo
+          ? { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: buildComboItems(p) }
+          : { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, printerId: p.printerId || "" };
+        draft.push(newItem);
+        setEditOrderNewItems(ni => {
+          const n = [...ni]; const e2 = n.find(i => i._key === key);
+          if (e2) e2.qty += 1; else n.push({ ...newItem, qty: 1 });
+          return n;
+        });
+      }
+      return draft;
+    });
+  }
+  function editOrderRemoveItem(itemKey) {
+    setEditOrderDraft(prev => {
+      if (!prev) return prev;
+      return prev.map(i => i._key === itemKey ? { ...i, qty: i.qty - 1 } : i).filter(i => i.qty > 0);
+    });
+  }
+  async function commitEditOrder() {
+    if (!editOrderKey) return;
+    const draft = editOrderDraft || [];
+    if (draft.length === 0) {
+      // Delete order if cart is empty
+      setActiveOrders(prev => { const n = { ...prev }; delete n[editOrderKey]; return n; });
+      setEditOrderKey(null);
+      setEditOrderDraft(null);
+      setEditOrderNewItems([]);
+      toast("🗑️ Order dikosongkan & dibuang", "#f87171");
+    } else {
+      const order = activeOrders[editOrderKey];
+      const newSub = draft.reduce((s, i) => s + i.price * i.qty, 0);
+      setActiveOrders(prev => ({ ...prev, [editOrderKey]: { ...order, cart: draft, subtotal: newSub, tax: newSub * taxRate, total: newSub * (1 + taxRate) } }));
+      setEditOrderKey(null);
+      setEditOrderDraft(null);
+      // Auto-print new items to kitchen/bar printer with sending overlay
+      if (editOrderNewItems.length > 0) {
+        const orderForPrint = { ...order, cart: editOrderNewItems };
+        setSendingOrder(true);
+        await printOrderSlips(orderForPrint);
+        setSendingOrder(false);
+        toast("✅ Edit disimpan & dihantar ke dapur!", "#4ade80");
+      } else {
+        toast("✅ Edit disimpan!", "#4ade80");
+      }
+      setEditOrderNewItems([]);
+    }
+  }
+
+  // ── Split Bill ───────────────────────────────────────────────────────────
+  function openSplit(key) { setSplitOrderKey(key); setSplitMode(true); setSplitSelected({}); setSplitCashIn(""); setSplitPayMethod("cash"); }
+  function toggleSplitItem(itemKey, maxQty) {
+    setSplitSelected(prev => {
+      const cur = prev[itemKey] || 0;
+      if (cur >= maxQty) { const n = { ...prev }; delete n[itemKey]; return n; }
+      return { ...prev, [itemKey]: cur + 1 };
+    });
+  }
+  function getSplitTotal() {
+    if (!splitOrderKey) return 0;
+    const order = activeOrders[splitOrderKey];
+    if (!order) return 0;
+    const sub = order.cart.reduce((s, i) => { const qty = splitSelected[i._key] || 0; return s + i.price * qty; }, 0);
+    return sub * (1 + taxRate);
+  }
+  async function doSplitCheckout(printRec) {
+    const order = activeOrders[splitOrderKey];
+    if (!order) return;
+    const splitCartItems = order.cart.map(i => ({ ...i, qty: splitSelected[i._key] || 0 })).filter(i => i.qty > 0);
+    const splitSub = splitCartItems.reduce((s, i) => s + i.price * i.qty, 0);
+    const splitTax = splitSub * taxRate;
+    const splitTotal = splitSub + splitTax;
+    const splitOrder = { ...order, id: `split_${Date.now()}`, num: orderNum, cart: splitCartItems, subtotal: splitSub, tax: splitTax, total: splitTotal, method: splitPayMethod, cash: parseFloat(splitCashIn) || 0, change: parseFloat(splitCashIn) - splitTotal, status: "paid", paidAt: new Date() };
+    setOrderNum(n => n + 1);
+    // Remove paid items from original order
+    const remainCart = order.cart.map(i => ({ ...i, qty: i.qty - (splitSelected[i._key] || 0) })).filter(i => i.qty > 0);
+    if (remainCart.length === 0) {
+      // All paid — remove order entirely
+      setActiveOrders(prev => { const n = { ...prev }; delete n[splitOrderKey]; return n; });
+    } else {
+      const remSub = remainCart.reduce((s, i) => s + i.price * i.qty, 0);
+      setActiveOrders(prev => ({ ...prev, [splitOrderKey]: { ...order, cart: remainCart, subtotal: remSub, tax: remSub * taxRate, total: remSub * (1 + taxRate) } }));
+    }
+    setSalesHistory(prev => [splitOrder, ...prev]);
+    setLastOrder(splitOrder);
+    if (printRec) await printReceipt(splitOrder);
+    setSplitMode(false); setSplitOrderKey(null); setSplitSelected({});
+    setShowReceiptModal(true);
+    toast("✅ Split bayaran berjaya!", "#4ade80");
+  }
+
+  // ── Pending QR Orders ────────────────────────────────────────────────────
+  async function acceptPendingOrder(pending) {
+    const num = orderNum;
+    const order = {
+      id: `order_${Date.now()}`,
+      num,
+      cart: pending.cart,
+      subtotal: pending.subtotal,
+      tax: pending.tax,
+      total: pending.total,
+      tableNo: pending.tableNo,
+      tableId: pending.tableId,
+      orderType: "Dine In",
+      orderKey: `order_${num}`,
+      displayName: `${pending.tableNo} (Order #${num})`,
+      customerName: pending.customerName,
+      customerPhone: pending.customerPhone,
+      time: new Date(),
+      status: "active",
+    };
+    setOrderNum(n => n + 1);
+    setActiveOrders(prev => ({ ...prev, [`order_${num}`]: order }));
+    setPendingOrders(prev => prev.map(o => o.id === pending.id ? { ...o, status: "accepted" } : o));
+    setSendingOrder(true);
+    await printOrderSlips(order);
+    setSendingOrder(false);
+    toast(`✅ Order #${num} dari ${pending.customerName} diterima!`, "#4ade80");
+  }
+  function rejectPendingOrder(id) {
+    setPendingOrders(prev => prev.map(o => o.id === id ? { ...o, status: "rejected" } : o));
+    toast("❌ Order ditolak", "#ef4444");
+  }
+  function clearDonePendingOrders() {
+    setPendingOrders(prev => prev.filter(o => o.status === "pending"));
+  }
+  const filtered = products.filter(p => (fCat === "all" || p.categoryId === fCat) && (fSub === "all" || p.subcategoryId === fSub) && p.name.toLowerCase().includes(search.toLowerCase()));
+  const filteredWithSoldOut = filtered; // keep all, show sold-out visually but disable click
+  const catSubs = fCat !== "all" ? (categories.find(c => c.id === fCat)?.subcategories || []) : [];
+  const itemSubs = categories.find(c => c.id === itemF.categoryId)?.subcategories || [];
+  const sections = [...new Set(tables.map(t => t.section))];
+  const change = parseFloat(cashIn) - (selectedTable ? activeOrders[selectedTable.id]?.total || 0 : 0);
+  // Today's orders only
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayOrders = salesHistory.filter(o => new Date(o.time) >= todayStart);
+
+  // Sales report data
+  const now = new Date();
+  const weekStart = new Date(now - 6 * 86400000); weekStart.setHours(0,0,0,0);
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const yearStart = new Date(now.getFullYear(), 0, 1);
+  const yesterdayStart = new Date(now); yesterdayStart.setDate(yesterdayStart.getDate() - 1); yesterdayStart.setHours(0,0,0,0);
+  const yesterdayEnd = new Date(yesterdayStart); yesterdayEnd.setHours(23,59,59,999);
+
+  const salesByFilter = salesHistory.filter(o => {
+    const t = new Date(o.time);
+    if (salesFilter === "yesterday") return t >= yesterdayStart && t <= yesterdayEnd;
+    if (salesFilter === "week") return t >= weekStart;
+    if (salesFilter === "month") return t >= monthStart;
+    if (salesFilter === "year") return t >= yearStart;
+    if (salesFilter === "pickdate" && salesPickDate) {
+      const ds = new Date(salesPickDate + "T00:00:00"); const de = new Date(salesPickDate + "T23:59:59");
+      return t >= ds && t <= de;
+    }
+    if (salesFilter === "pickmonth" && salesPickMonth) {
+      const [yr, mo] = salesPickMonth.split("-").map(Number);
+      return t.getFullYear() === yr && t.getMonth() + 1 === mo;
+    }
+    if (salesFilter === "pickyear" && salesPickYear) {
+      return t.getFullYear() === parseInt(salesPickYear);
+    }
+    return true;
+  });
+
+  // Group by day for chart
+  const salesByDay = {};
+  salesByFilter.forEach(o => {
+    const day = fmtDate(o.time);
+    if (!salesByDay[day]) salesByDay[day] = { total: 0, count: 0 };
+    salesByDay[day].total += o.total;
+    salesByDay[day].count += 1;
+  });
+
+  const totalSalesFilter = salesByFilter.reduce((s, o) => s + o.total, 0);
+  const totalSales = salesHistory.reduce((s, o) => s + o.total, 0);
+
+  // ── Styles ───────────────────────────────────────────────────────────────
+  const S = {
+    modal: { position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000, padding: 16 },
+    mbox: { background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 440, maxHeight: "90vh", overflowY: "auto" },
+    inp: { width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box", background: "#fff", color: "#1e293b" },
+    sel: { width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box", background: "#fff", color: "#1e293b" },
+    lbl: { fontSize: 13, color: "#475569", marginBottom: 5, display: "block", fontWeight: 600 },
+    btn: (color = "#3b82f6") => ({ padding: "10px 20px", background: color, border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }),
+  };
+
+  // ════════════════════════════════════════════════════════════════════════
+  // QR CUSTOMER ORDER PAGE — render bila ada ?qrorder=1 dalam URL
+  // ════════════════════════════════════════════════════════════════════════
+  const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+  const isQROrderPage = urlParams.get("qrorder") === "1";
+  const qrTableId = urlParams.get("table") || "";
+  const qrTableName = tables.find(t => t.id === qrTableId)?.name || `Meja ${qrTableId}`;
+
+  const [qrCart, setQrCart] = useState([]);
+  const [qrName, setQrName] = useState("");
+  const [qrPhone, setQrPhone] = useState("");
+  const [qrSubmitted, setQrSubmitted] = useState(false);
+  const [qrCatFilter, setQrCatFilter] = useState("all");
+  const [qrShowCombos, setQrShowCombos] = useState(false);
+  const [qrSearch, setQrSearch] = useState("");
+
+  if (isQROrderPage) {
+    const qrFiltered = products.filter(p =>
+      !p.soldOut &&
+      (qrCatFilter === "all" || p.categoryId === qrCatFilter) &&
+      p.name.toLowerCase().includes(qrSearch.toLowerCase())
+    );
+    const qrSub = qrCart.reduce((s, i) => s + i.price * i.qty, 0);
+    const qrTax = qrSub * taxRate;
+    const qrTotal = qrSub + qrTax;
+
+    const validatePhone = (p) => /^[0-9]{9,11}$/.test(p.replace(/[-\s]/g, ""));
+
+    function qrAddItem(p, isCombo = false) {
+      const key = isCombo ? `combo_${p.id}` : `item_${p.id}`;
+      setQrCart(prev => {
+        const e = prev.find(i => i._key === key);
+        if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
+        if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: [...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || [])] }];
+        return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, printerId: p.printerId || "" }];
+      });
+    }
+    function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
+
+    function qrSubmitOrder() {
+      if (!qrName.trim()) return alert("Sila masukkan nama anda");
+      if (!validatePhone(qrPhone)) return alert("Nombor telefon tidak sah (9-11 digit)");
+      if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
+
+      const pending = {
+        id: `qr_${Date.now()}`,
+        tableId: qrTableId,
+        tableNo: qrTableName,
+        customerName: qrName.trim(),
+        customerPhone: qrPhone.trim(),
+        cart: qrCart,
+        subtotal: qrSub,
+        tax: qrTax,
+        total: qrTotal,
+        time: new Date().toISOString(),
+        status: "pending",
+        orderType: "Dine In",
+      };
+      setPendingOrders(prev => [...prev, pending]);
+      setQrSubmitted(true);
+    }
+
+    if (qrSubmitted) return (
+      <div style={{ minHeight: "100vh", background: "#f0fdf4", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ background: "#fff", borderRadius: 16, padding: 32, maxWidth: 380, width: "100%", textAlign: "center", boxShadow: "0 4px 24px rgba(0,0,0,.1)" }}>
+          <div style={{ fontSize: 60, marginBottom: 16 }}>✅</div>
+          <div style={{ fontSize: 22, fontWeight: 700, color: "#166534", marginBottom: 8 }}>Order Diterima!</div>
+          <div style={{ fontSize: 14, color: "#64748b", marginBottom: 20 }}>Order untuk <b>{qrTableName}</b> sedang diproses. Staff kami akan membantu anda.</div>
+          <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 12, padding: 14, marginBottom: 20, textAlign: "left" }}>
+            {qrCart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}><span>{i.emoji} {i.name} ×{i.qty}</span><span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span></div>)}
+            <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15 }}><span>JUMLAH</span><span>{formatRM(qrTotal)}</span></div>
+          </div>
+          <div style={{ fontSize: 13, color: "#94a3b8" }}>Bayaran di kaunter. Terima kasih, {qrName}! 🙏</div>
+        </div>
+      </div>
+    );
+
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "'Segoe UI',sans-serif" }}>
+        {/* Header */}
+        <div style={{ background: "#1e293b", padding: "14px 20px", position: "sticky", top: 0, zIndex: 100 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <div style={{ fontSize: 24 }}>🏪</div>
+            <div>
+              <div style={{ color: "#fff", fontWeight: 700, fontSize: 16 }}>{receiptConfig.shopName || "Warung Digital"}</div>
+              <div style={{ color: "#f59e0b", fontSize: 12, fontWeight: 600 }}>📍 {qrTableName}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Customer Info */}
+        <div style={{ padding: "14px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 4 }}>Nama *</label>
+              <input value={qrName} onChange={e => setQrName(e.target.value)} placeholder="Nama anda" style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, color: "#64748b", fontWeight: 600, display: "block", marginBottom: 4 }}>No. Phone *</label>
+              <input value={qrPhone} onChange={e => setQrPhone(e.target.value)} placeholder="0123456789" type="tel" style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+            </div>
+          </div>
+        </div>
+
+        {/* Category tabs */}
+        <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", overflowX: "auto", whiteSpace: "nowrap", padding: "10px 12px", display: "flex", gap: 8 }}>
+          <button onClick={() => { setQrCatFilter("all"); setQrShowCombos(false); }} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid", fontSize: 12, fontWeight: 600, cursor: "pointer", background: qrCatFilter === "all" && !qrShowCombos ? "#1e293b" : "transparent", color: qrCatFilter === "all" && !qrShowCombos ? "#fff" : "#64748b", borderColor: qrCatFilter === "all" && !qrShowCombos ? "#1e293b" : "#e2e8f0", flexShrink: 0 }}>📋 Semua</button>
+          <button onClick={() => setQrShowCombos(true)} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid", fontSize: 12, fontWeight: 600, cursor: "pointer", background: qrShowCombos ? "#f59e0b" : "transparent", color: qrShowCombos ? "#000" : "#64748b", borderColor: qrShowCombos ? "#f59e0b" : "#e2e8f0", flexShrink: 0 }}>🍱 Set</button>
+          {categories.map(c => <button key={c.id} onClick={() => { setQrCatFilter(c.id); setQrShowCombos(false); }} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid", fontSize: 12, fontWeight: 600, cursor: "pointer", background: qrCatFilter === c.id && !qrShowCombos ? "#3b82f6" : "transparent", color: qrCatFilter === c.id && !qrShowCombos ? "#fff" : "#64748b", borderColor: qrCatFilter === c.id && !qrShowCombos ? "#3b82f6" : "#e2e8f0", flexShrink: 0 }}>{c.name}</button>)}
+        </div>
+
+        {/* Search */}
+        <div style={{ padding: "10px 14px", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+          <input value={qrSearch} onChange={e => setQrSearch(e.target.value)} placeholder="🔍 Cari menu..." style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 8, padding: "9px 12px", fontSize: 13, outline: "none", boxSizing: "border-box" }} />
+        </div>
+
+        {/* Menu Grid */}
+        <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, paddingBottom: qrCart.length > 0 ? 180 : 20 }}>
+          {(qrShowCombos ? combos.filter(c => !c.soldOut) : qrFiltered).map(p => {
+            const isCombo = qrShowCombos;
+            const cartItem = qrCart.find(i => i._key === (isCombo ? `combo_${p.id}` : `item_${p.id}`));
+            return (
+              <div key={p.id} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 14, padding: "12px 10px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.05)" }}>
+                <div style={{ fontSize: 32, marginBottom: 6 }}>{p.emoji}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>{p.name}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: isCombo ? "#f59e0b" : "#3b82f6", marginBottom: 10 }}>{formatRM(p.price)}</div>
+                {cartItem ? (
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+                    <button onClick={() => qrUpdQty(cartItem._key, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
+                    <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{cartItem.qty}</span>
+                    <button onClick={() => qrAddItem(p, isCombo)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>+</button>
+                  </div>
+                ) : (
+                  <button onClick={() => qrAddItem(p, isCombo)} style={{ width: "100%", padding: "7px 0", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Tambah</button>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Floating cart bar */}
+        {qrCart.length > 0 && (
+          <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#1e293b", padding: "14px 20px", boxShadow: "0 -4px 20px rgba(0,0,0,.2)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ color: "#94a3b8", fontSize: 13 }}>{qrCart.reduce((s, i) => s + i.qty, 0)} item</div>
+              <div style={{ color: "#f59e0b", fontWeight: 700, fontSize: 18 }}>{formatRM(qrTotal)}</div>
+            </div>
+            <button onClick={qrSubmitOrder} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+              📨 Hantar Order ({qrTableName})
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ════════════════════════════════════════════════════════════════════════
+  // RECEIPT SCREEN
+  // ════════════════════════════════════════════════════════════════════════
+  if (showReceiptModal && lastOrder) return (
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ background: "#fff", width: 340, borderRadius: 12, padding: "28px 24px", boxShadow: "0 4px 24px rgba(0,0,0,.12)", fontFamily: "'Courier New',monospace" }}>
+        <div style={{ textAlign: "center", borderBottom: "2px dashed #e2e8f0", paddingBottom: 14, marginBottom: 14 }}>
+          <div style={{ fontSize: 28 }}>🏪</div>
+          <div style={{ fontSize: 17, fontWeight: 700, letterSpacing: 2 }}>WARUNG DIGITAL</div>
+          <div style={{ fontSize: 11, color: "#888" }}>Tel: 03-1234 5678</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 10, color: "#666" }}>
+          <span>No. #{lastOrder.num}</span><span>{new Date(lastOrder.time).toLocaleString("ms-MY")}</span>
+        </div>
+        {lastOrder.tableNo && <div style={{ fontSize: 12, color: "#666", marginBottom: 6 }}>Meja: {lastOrder.tableNo} · {lastOrder.orderType}</div>}
+        <div style={{ borderTop: "1px dashed #ddd", paddingTop: 10 }}>
+          {lastOrder.cart.map(i => (
+            <div key={i._key} style={{ marginBottom: 5 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span></div>
+              {i.isCombo && i.comboItems && i.comboItems.map(ci => <div key={ci.productId} style={{ fontSize: 11, color: "#888", paddingLeft: 16 }}>· {ci.name} x{ci.qty}</div>)}
+            </div>
+          ))}
+        </div>
+        <div style={{ borderTop: "1px dashed #ddd", marginTop: 10, paddingTop: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(lastOrder.subtotal)}</span></div>
+          {lastOrder.tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginBottom: 7 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(lastOrder.tax)}</span></div>}
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 16, fontWeight: 700, borderTop: "2px solid #000", paddingTop: 7 }}><span>JUMLAH</span><span>{formatRM(lastOrder.total)}</span></div>
+          {lastOrder.method === "cash" && <>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#666", marginTop: 5 }}><span>Tunai</span><span>{formatRM(lastOrder.cash)}</span></div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600, color: "#16a34a" }}><span>Baki</span><span>{formatRM(lastOrder.change)}</span></div>
+          </>}
+        </div>
+        <div style={{ textAlign: "center", marginTop: 16, paddingTop: 14, borderTop: "2px dashed #ddd", fontSize: 12, color: "#888" }}>✨ Terima Kasih ✨<br />Sila Datang Lagi!</div>
+        <button onClick={() => { setShowReceiptModal(false); setPage("tables"); }} style={{ width: "100%", marginTop: 16, padding: 12, background: "#3b82f6", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>← Balik ke Dashboard</button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#f1f5f9", fontFamily: "'Segoe UI',sans-serif" }}>
+
+      {/* Notification */}
+      {notif && <div style={{ position: "fixed", top: 16, right: 16, background: "#1e293b", border: `1px solid ${notifClr}`, borderRadius: 10, padding: "10px 16px", fontSize: 13, zIndex: 9999, color: notifClr, boxShadow: "0 4px 12px rgba(0,0,0,.3)" }}>{notif}</div>}
+
+      {/* Sending Order Overlay */}
+      {sendingOrder && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.65)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9998 }}>
+          <div style={{ background: "#1e293b", border: "2px solid #22c55e", borderRadius: 20, padding: "36px 48px", textAlign: "center", boxShadow: "0 8px 40px rgba(0,0,0,.5)" }}>
+            <div style={{ fontSize: 52, marginBottom: 16, animation: "spin 1s linear infinite" }}>🖨️</div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#22c55e", marginBottom: 8 }}>Sending Order...</div>
+            <div style={{ fontSize: 13, color: "#94a3b8" }}>Menghantar ke dapur / bar</div>
+            <div style={{ marginTop: 20, display: "flex", justifyContent: "center", gap: 6 }}>
+              {[0,1,2].map(i => <div key={i} style={{ width: 10, height: 10, borderRadius: "50%", background: "#22c55e", opacity: 0.4 + i * 0.3 }} />)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ORDER TYPE MODAL ── */}
+      {showOrderTypeModal && (
+        <div style={S.modal}>
+          <div style={{ ...S.mbox, maxWidth: 500 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>Pilih Jenis Order</div>
+              <button onClick={() => setShowOrderTypeModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 36, height: 36, color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+              {ORDER_TYPES.map(t => (
+                <button key={t.id} onClick={() => {
+                  setCurrentOrderType(t);
+                  setShowOrderTypeModal(false);
+                  if (t.id === "dinein") setShowTableModal(true);
+                  else { setCurrentTable(null); setPage("order"); setCart([]); }
+                }} style={{ padding: "20px 10px", background: "#f8fafc", border: `2px solid ${t.color}`, borderRadius: 12, cursor: "pointer", textAlign: "center" }}>
+                  <div style={{ fontSize: 40, marginBottom: 8 }}>{t.emoji}</div>
+                  <div style={{ fontWeight: 700, color: t.color, fontSize: 14 }}>{t.label}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── TABLE SELECT MODAL ── */}
+      {showTableModal && (
+        <div style={S.modal}>
+          <div style={{ ...S.mbox, maxWidth: 500 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>Pilih Meja</div>
+              <button onClick={() => setShowTableModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 36, height: 36, color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            {sections.map(section => (
+              <div key={section} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>{section}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                {tables.filter(t => t.section === section).map(t => {
+                    const tableOrderCount = Object.values(activeOrders).filter(o => o.tableId === t.id).length;
+                    return (
+                      <button key={t.id}
+                        onClick={() => {
+                          setCurrentTable(t);
+                          setShowTableModal(false);
+                          setPage("order");
+                          setCart([]);
+                        }}
+                        style={{ padding: "16px 8px", background: tableOrderCount > 0 ? "#fff7ed" : "#f0fdf4", border: `2px solid ${tableOrderCount > 0 ? "#f59e0b" : "#22c55e"}`, borderRadius: 10, cursor: "pointer", textAlign: "center" }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: tableOrderCount > 0 ? "#92400e" : "#166534" }}>{t.name.replace("Meja ", "")}</div>
+                        <div style={{ fontSize: 10, color: tableOrderCount > 0 ? "#92400e" : "#166534" }}>{tableOrderCount > 0 ? `⚡ ${tableOrderCount} order` : "Kosong"}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── PAY MODAL ── */}
+      {showPayModal && selectedTable && activeOrders[selectedTable.id] && (
+        <div style={S.modal}>
+          <div style={{ ...S.mbox, maxWidth: 420 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>💳 Bayaran — {selectedTable.name}</div>
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+              {activeOrders[selectedTable.id]?.cart.map(i => (
+                <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                  <span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span>
+                </div>
+              ))}
+              <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 8, paddingTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(activeOrders[selectedTable.id]?.subtotal || 0)}</span></div>
+                {(activeOrders[selectedTable.id]?.tax || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(activeOrders[selectedTable.id]?.tax || 0)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b" }}><span>JUMLAH</span><span>{formatRM(activeOrders[selectedTable.id]?.total || 0)}</span></div>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Kaedah Bayaran</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["cash", "💵 Tunai"], ["card", "💳 Kad"], ["qr", "📱 QR"]].map(([id, l]) => (
+                  <button key={id} onClick={() => setPayMethod(id)} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: payMethod === id ? "#3b82f6" : "#f8fafc", color: payMethod === id ? "#fff" : "#64748b", borderColor: payMethod === id ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {payMethod === "cash" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={S.lbl}>Jumlah Tunai</label>
+                <input type="number" value={cashIn} onChange={e => setCashIn(e.target.value)} placeholder="0.00" style={{ ...S.inp, fontSize: 18, fontWeight: 700, marginBottom: 8 }} />
+                <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                  {[10, 20, 50, 100].map(a => <button key={a} onClick={() => setCashIn(a.toString())} style={{ flex: 1, padding: "8px 0", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#000" }}>RM{a}</button>)}
+                </div>
+                {cashIn && parseFloat(cashIn) >= (activeOrders[selectedTable.id]?.total || 0) && (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", fontSize: 14, color: "#166534", fontWeight: 600 }}>
+                    <span>Baki:</span><span>{formatRM(change)}</span>
+                  </div>
+                )}
+                {cashIn && parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0) && (
+                  <div style={{ background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#dc2626" }}>⚠️ Wang tidak mencukupi</div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => { if (payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))) return; checkout(activeOrders[selectedTable.id], false); }}
+                disabled={payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))}
+                style={{ flex: 1, padding: 12, background: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#e2e8f0" : "#64748b", border: "none", borderRadius: 8, color: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 13, cursor: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "not-allowed" : "pointer" }}>✅ Bayar (Tanpa Print)</button>
+              <button onClick={() => checkout(activeOrders[selectedTable.id], true)}
+                disabled={payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))}
+                style={{ flex: 1, padding: 12, background: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#e2e8f0" : "#22c55e", border: "none", borderRadius: 8, color: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 13, cursor: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "not-allowed" : "pointer" }}>🖨️ Bayar + Print Resit</button>
+            </div>
+            <button onClick={() => setShowPayModal(false)} style={{ width: "100%", marginTop: 8, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", color: "#64748b" }}>← Batal</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── HEADER ── */}
+      <div style={{ background: "#1e293b", padding: "0 20px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 56 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 32, height: 32, background: "linear-gradient(135deg,#f59e0b,#ef4444)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🏪</div>
+          <div style={{ color: "#fff", fontWeight: 700, fontSize: 15 }}>Warung Digital POS</div>
+          {/* Shift status */}
+          {currentShift ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#22c55e", animation: "pulse 2s infinite" }}></div>
+              <span style={{ color: "#86efac", fontSize: 11, fontWeight: 600 }}>SHIFT: {currentShift.name}</span>
+              <button onClick={() => setCloseShiftModal(true)} style={{ padding: "3px 8px", background: "#ef4444", border: "none", borderRadius: 4, color: "#fff", fontSize: 10, fontWeight: 700, cursor: "pointer" }}>TUTUP</button>
+            </div>
+          ) : (
+            <button onClick={() => setShiftModal(true)} style={{ padding: "4px 10px", background: "#f59e0b", border: "none", borderRadius: 4, color: "#000", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>▶ BUKA SHIFT</button>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 4 }}>
+          {[["tables","🍽️ Order"],["history","📋 Past Order"],["sales","📊 Sales Report"],["settings","⚙️ Settings"]].map(([k, l]) => (
+            <button key={k} onClick={() => { setPage(k); if (k === "settings") setSettingsTab("menu"); }} style={{ padding: "6px 12px", background: page === k ? "#f59e0b" : "transparent", border: "1px solid", borderColor: page === k ? "#f59e0b" : "#334155", borderRadius: 6, color: page === k ? "#000" : "#94a3b8", fontSize: 11, fontWeight: page === k ? 700 : 400, cursor: "pointer" }}>{l}</button>
+          ))}
+          <button onClick={() => setShowQRModal(true)} style={{ padding: "6px 12px", background: "#8b5cf6", border: "1px solid #8b5cf6", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer", position: "relative" }}>
+            📱 QR Order
+            {newPendingCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, background: "#ef4444", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{newPendingCount}</span>}
+          </button>
+        </div>
+      </div>
+
+      {/* ══ ORDER PAGE ══ */}
+      {page === "order" && (
+        <div style={{ display: "flex", height: "calc(100vh - 56px)" }}>
+          {/* Left: Categories */}
+          <div style={{ width: 160, background: "#1e293b", overflowY: "auto", padding: "12px 8px" }}>
+            <button onClick={() => { setFCat("all"); setFSub("all"); setShowCombos(false); }}
+              style={{ width: "100%", padding: "10px 8px", marginBottom: 4, background: fCat === "all" && !showCombos ? "#f59e0b" : "transparent", border: "none", borderRadius: 8, color: fCat === "all" && !showCombos ? "#000" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+              📋 Semua
+            </button>
+            <button onClick={() => setShowCombos(true)}
+              style={{ width: "100%", padding: "10px 8px", marginBottom: 4, background: showCombos ? "#f59e0b" : "transparent", border: "none", borderRadius: 8, color: showCombos ? "#000" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+              🍱 Set/Combo
+            </button>
+            {categories.map(c => (
+              <button key={c.id} onClick={() => { setFCat(c.id); setFSub("all"); setShowCombos(false); }}
+                style={{ width: "100%", padding: "10px 8px", marginBottom: 4, background: fCat === c.id && !showCombos ? "#3b82f6" : "transparent", border: "none", borderRadius: 8, color: fCat === c.id && !showCombos ? "#fff" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>
+                {c.name}
+              </button>
+            ))}
+          </div>
+
+          {/* Middle: Products */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+            <div style={{ padding: "10px 14px", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                <input value={search} onChange={e => setSearch(e.target.value)} placeholder="🔍 Cari menu..." style={{ ...S.inp, flex: 1 }} />
+                <div style={{ fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>
+                  {currentOrderType && <span style={{ background: currentOrderType.color, color: "#fff", padding: "4px 10px", borderRadius: 20, fontWeight: 600 }}>{currentOrderType.emoji} {currentOrderType.label}</span>}
+                  {currentTable && <span style={{ background: "#f59e0b", color: "#000", padding: "4px 10px", borderRadius: 20, fontWeight: 600, marginLeft: 6 }}>🪑 {currentTable.name}</span>}
+                </div>
+              </div>
+              {!showCombos && fCat !== "all" && catSubs.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  <button onClick={() => setFSub("all")} style={{ padding: "3px 10px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: fSub === "all" ? "#3b82f6" : "transparent", color: fSub === "all" ? "#fff" : "#64748b", borderColor: fSub === "all" ? "#3b82f6" : "#e2e8f0" }}>Semua</button>
+                  {catSubs.map(s => <button key={s.id} onClick={() => setFSub(s.id)} style={{ padding: "3px 10px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: fSub === s.id ? "#3b82f6" : "transparent", color: fSub === s.id ? "#fff" : "#64748b", borderColor: fSub === s.id ? "#3b82f6" : "#e2e8f0" }}>{s.name}</button>)}
+                </div>
+              )}
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 10, alignContent: "start" }}>
+              {showCombos ? combos.map(c => (
+                <button key={c.id} onClick={() => !c.soldOut && addCart(c, true)} style={{ background: c.soldOut ? "#f1f5f9" : "#fff", border: `2px solid ${c.soldOut ? "#e2e8f0" : "#e2e8f0"}`, borderRadius: 12, padding: "14px 10px", cursor: c.soldOut ? "not-allowed" : "pointer", textAlign: "center", transition: "all .15s", opacity: c.soldOut ? 0.6 : 1, position: "relative" }}
+                  onMouseEnter={e => { if (!c.soldOut) e.currentTarget.style.borderColor = "#f59e0b"; }}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
+                  <div style={{ fontSize: 28, marginBottom: 5 }}>{c.emoji}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 2, color: "#1e293b" }}>{c.name}</div>
+                  <div style={{ fontSize: 10, color: "#94a3b8", marginBottom: 4 }}>{c.description}</div>
+                  {c.soldOut ? <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", background: "#fef2f2", borderRadius: 6, padding: "2px 8px" }}>SOLD OUT</div> : <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b" }}>{formatRM(c.price)}</div>}
+                </button>
+              )) : filtered.map(p => (
+                <button key={p.id} onClick={() => !p.soldOut && addCart(p)} style={{ background: p.soldOut ? "#f1f5f9" : "#fff", border: "2px solid #e2e8f0", borderRadius: 12, padding: "14px 10px", cursor: p.soldOut ? "not-allowed" : "pointer", textAlign: "center", transition: "all .15s", opacity: p.soldOut ? 0.6 : 1 }}
+                  onMouseEnter={e => { if (!p.soldOut) e.currentTarget.style.borderColor = "#3b82f6"; }}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
+                  <div style={{ fontSize: 28, marginBottom: 5 }}>{p.emoji}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, color: "#1e293b" }}>{p.name}</div>
+                  {p.soldOut ? <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", background: "#fef2f2", borderRadius: 6, padding: "2px 8px" }}>SOLD OUT</div> : <div style={{ fontSize: 14, fontWeight: 700, color: "#3b82f6" }}>{formatRM(p.price)}</div>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Right: Cart */}
+          <div style={{ width: 300, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "14px 16px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ fontWeight: 700, fontSize: 15, color: "#1e293b" }}>🛒 Cart ({cart.reduce((s, i) => s + i.qty, 0)} item)</div>
+              {cart.length > 0 && <button onClick={() => setCart([])} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>Clear All</button>}
+            </div>
+            <div style={{ flex: 1, overflowY: "auto", padding: "8px 14px" }}>
+              {cart.length === 0 ? <div style={{ textAlign: "center", color: "#94a3b8", paddingTop: 50 }}><div style={{ fontSize: 36, marginBottom: 8 }}>🛒</div><div style={{ fontSize: 13 }}>No items in cart</div></div>
+                : cart.map(i => (
+                  <div key={i._key} style={{ padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>{i.emoji}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600 }}>{i.name}</div>
+                        <div style={{ fontSize: 12, color: "#3b82f6" }}>{formatRM(i.price)}</div>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <button onClick={() => updQty(i._key, -1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>−</button>
+                        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{i.qty}</span>
+                        <button onClick={() => updQty(i._key, 1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>+</button>
+                      </div>
+                      <div style={{ fontSize: 13, fontWeight: 700, minWidth: 52, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
+                    </div>
+                    {i.isCombo && i.comboItems && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId} style={{ fontSize: 11, color: "#94a3b8" }}>· {ci.name} x{ci.qty}</div>)}</div>}
+                  </div>
+                ))}
+            </div>
+            {cart.length > 0 && (
+              <div style={{ padding: "14px 16px", borderTop: "1px solid #e2e8f0" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(sub)}</span></div>
+                {tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 10 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(tax)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}><span>JUMLAH</span><span>{formatRM(total)}</span></div>
+                <button onClick={createOrder} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+                  🖨️ CREATE ORDER
+                </button>
+                <button onClick={() => { setPage("tables"); setCart([]); }} style={{ width: "100%", marginTop: 8, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 13 }}>← Balik</button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══ TABLES / ORDER PAGE ══ */}
+      {page === "tables" && (
+        <div style={{ padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+            <div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#1e293b" }}>🍽️ Order Dashboard</div>
+              <div style={{ fontSize: 13, color: "#64748b" }}>{Object.keys(activeOrders).length} order aktif</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              {newPendingCount > 0 && (
+                <button onClick={() => setShowQRModal(true)} style={{ padding: "10px 16px", background: "#fef3c7", border: "2px solid #f59e0b", borderRadius: 10, color: "#92400e", fontWeight: 700, fontSize: 13, cursor: "pointer", animation: "pulse 2s infinite" }}>
+                  🔔 {newPendingCount} QR Order Baru
+                </button>
+              )}
+              <button onClick={() => setShowOrderTypeModal(true)} style={{ padding: "12px 24px", background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>+ Create New Order</button>
+            </div>
+          </div>
+
+          {Object.keys(activeOrders).length === 0 && (
+            <div style={{ textAlign: "center", padding: "60px 20px", color: "#94a3b8" }}>
+              <div style={{ fontSize: 60, marginBottom: 16 }}>🍽️</div>
+              <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8, color: "#64748b" }}>NO NEW ORDER</div>
+              <div style={{ fontSize: 13 }}>Tiada order buat masa ini</div>
+            </div>
+          )}
+
+          {sections.map(section => {
+            // Kumpul semua order yang tableId dalam section ni
+            const sectionOrders = Object.values(activeOrders).filter(o => {
+              const tbl = tables.find(t => t.id === o.tableId);
+              return tbl && tbl.section === section;
+            });
+            if (sectionOrders.length === 0) return null;
+            return (
+              <div key={section} style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#64748b", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>{section}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12 }}>
+                  {sectionOrders.map(order => {
+                    const oKey = order.orderKey || order.id;
+                    const isMergeTarget = mergeMode && mergeSourceKey !== oKey;
+                    const isMergeSource = mergeMode && mergeSourceKey === oKey;
+                    return (
+                      <div key={oKey} style={{ background: isMergeTarget ? "#f0fdf4" : isMergeSource ? "#fef9c3" : "#fff7ed", border: `2px solid ${isMergeTarget ? "#22c55e" : isMergeSource ? "#f59e0b" : "#f59e0b"}`, borderRadius: 14, padding: 14, boxShadow: "0 2px 12px rgba(245,158,11,.15)" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e" }}>{order.displayName || order.tableNo}</div>
+                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
+                        </div>
+                        <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>{order.cart.length} item · {fmtTime(order.time)} · {order.orderType}</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#f59e0b", marginBottom: 10 }}>{formatRM(order.total)}</div>
+                        {mergeMode ? (
+                          <button onClick={() => isMergeSource ? (setMergeMode(false), setMergeSourceKey(null)) : doMerge(oKey)}
+                            style={{ width: "100%", padding: "8px 0", background: isMergeSource ? "#f59e0b" : "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                            {isMergeSource ? "✕ Batal" : "⬅ Gabung ke sini"}
+                          </button>
+                        ) : (
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                            <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                            <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
+                            <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
+                            <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Takeaway/Delivery */}
+          {Object.values(activeOrders).filter(o => !o.tableId).length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#64748b", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Takeaway / Delivery</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12 }}>
+                {Object.values(activeOrders).filter(o => !o.tableId).map(order => {
+                  const oKey = order.id;
+                  const isMergeTarget = mergeMode && mergeSourceKey !== oKey;
+                  const isMergeSource = mergeMode && mergeSourceKey === oKey;
+                  return (
+                    <div key={oKey} style={{ background: isMergeTarget ? "#f0fdf4" : isMergeSource ? "#fef9c3" : "#f0fdf4", border: `2px solid ${isMergeTarget ? "#22c55e" : isMergeSource ? "#f59e0b" : "#22c55e"}`, borderRadius: 14, padding: 14 }}>
+                      <div style={{ fontWeight: 700, color: "#166534", marginBottom: 4 }}>Order #{order.num}</div>
+                      <div style={{ fontSize: 12, color: "#166534", marginBottom: 2 }}>{order.cart.length} item · {order.orderType}</div>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: "#22c55e", marginBottom: 10 }}>{formatRM(order.total)}</div>
+                      {mergeMode ? (
+                        <button onClick={() => isMergeSource ? (setMergeMode(false), setMergeSourceKey(null)) : doMerge(oKey)}
+                          style={{ width: "100%", padding: "8px 0", background: isMergeSource ? "#f59e0b" : "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
+                          {isMergeSource ? "✕ Batal" : "⬅ Gabung ke sini"}
+                        </button>
+                      ) : (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                          <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                          <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
+                          <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
+                          <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ══ PAST ORDER PAGE ══ */}
+      {page === "history" && (
+        <div style={{ padding: 20 }}>
+          <div style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", marginBottom: 6 }}>📋 Past Order</div>
+
+          {/* Date filter */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, alignItems: "center", flexWrap: "wrap" }}>
+            <button onClick={() => setHistDateFilter("")} style={{ padding: "7px 16px", background: histDateFilter === "" ? "#3b82f6" : "#fff", border: "1px solid", borderColor: histDateFilter === "" ? "#3b82f6" : "#e2e8f0", borderRadius: 8, color: histDateFilter === "" ? "#fff" : "#1e293b", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>Hari Ini</button>
+            <input
+              type="date"
+              value={histDateFilter}
+              max={new Date().toISOString().split("T")[0]}
+              onChange={e => setHistDateFilter(e.target.value)}
+              style={{ padding: "7px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, color: "#1e293b", background: histDateFilter ? "#eff6ff" : "#fff", fontWeight: histDateFilter ? 700 : 400, cursor: "pointer", outline: "none" }}
+            />
+            {histDateFilter && <button onClick={() => setHistDateFilter("")} style={{ padding: "7px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, color: "#ef4444", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>✕ Clear</button>}
+          </div>
+
+          {(() => {
+            let filtered;
+            if (histDateFilter) {
+              const selStart = new Date(histDateFilter + "T00:00:00");
+              const selEnd = new Date(histDateFilter + "T23:59:59");
+              filtered = salesHistory.filter(o => { const t = new Date(o.time); return t >= selStart && t <= selEnd; });
+            } else {
+              filtered = todayOrders;
+            }
+            const displayDate = histDateFilter ? new Date(histDateFilter + "T00:00:00").toLocaleDateString("ms-MY", { day: "2-digit", month: "long", year: "numeric" }) : fmtDate(new Date());
+            return (
+              <>
+                <div style={{ fontSize: 13, color: "#64748b", marginBottom: 12 }}>{displayDate}</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "center" }}>
+                  <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 8, padding: "8px 16px", fontSize: 14, fontWeight: 700, color: "#166534" }}>
+                    Jumlah: {formatRM(filtered.reduce((s, o) => s + o.total, 0))}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#64748b" }}>{filtered.length} order</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {filtered.length === 0 && <div style={{ textAlign: "center", color: "#94a3b8", padding: 40 }}>
+                    <div style={{ fontSize: 40, marginBottom: 10 }}>📋</div>
+                    Tiada order untuk tarikh ini
+                  </div>}
+                  {filtered.map(o => (
+                    <div key={o.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", cursor: "pointer" }} onClick={() => setHistDetail(histDetail?.id === o.id ? null : o)}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: "#1e293b" }}>Order #{o.num}</div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>{fmtTime(o.time)} · {o.tableNo} · {o.orderType}</div>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 16, color: "#22c55e" }}>{formatRM(o.total)}</div>
+                      </div>
+                      {histDetail?.id === o.id && (
+                        <div style={{ marginTop: 10, borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
+                          {o.cart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3, color: "#1e293b" }}><span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span></div>)}
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginTop: 6, paddingTop: 6, borderTop: "1px solid #f1f5f9", color: "#1e293b" }}><span>Kaedah: {o.method}</span><span>{formatRM(o.total)}</span></div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* ══ SALES REPORT PAGE ══ */}
+      {page === "sales" && (
+        <div style={{ padding: 20 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ fontSize: 20, fontWeight: 700, color: "#1e293b" }}>📊 Sales Report</div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b", cursor: "pointer" }}>
+                <input type="checkbox" checked={salesPrintItems} onChange={e => setSalesPrintItems(e.target.checked)} />
+                Sertakan Item
+              </label>
+              <button onClick={() => setSalesPrintModal(true)} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>🖨️ Print / Download</button>
+            </div>
+          </div>
+
+          {/* Filter buttons */}
+          <div style={{ display: "flex", gap: 6, marginBottom: 10, flexWrap: "wrap" }}>
+            {[["yesterday","Semalam"],["week","7 Hari"],["month","Bulan Ini"],["year","Tahun Ini"],["pickdate","📅 Tarikh"],["pickmonth","🗓️ Bulan"],["pickyear","📆 Tahun"]].map(([k,l]) => (
+              <button key={k} onClick={() => setSalesFilter(k)} style={{ padding: "8px 14px", background: salesFilter === k ? "#3b82f6" : "#fff", border: "1px solid", borderColor: salesFilter === k ? "#3b82f6" : "#e2e8f0", borderRadius: 8, color: salesFilter === k ? "#fff" : "#1e293b", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+
+          {/* Custom date/month/year pickers */}
+          {salesFilter === "pickdate" && (
+            <div style={{ marginBottom: 12 }}>
+              <input type="date" value={salesPickDate} max={new Date().toISOString().split("T")[0]} onChange={e => setSalesPickDate(e.target.value)} style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", background: salesPickDate ? "#eff6ff" : "#fff", color: "#1e293b" }} />
+            </div>
+          )}
+          {salesFilter === "pickmonth" && (
+            <div style={{ marginBottom: 12 }}>
+              <input type="month" value={salesPickMonth} max={new Date().toISOString().slice(0,7)} onChange={e => setSalesPickMonth(e.target.value)} style={{ padding: "8px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, outline: "none", background: salesPickMonth ? "#eff6ff" : "#fff", color: "#1e293b" }} />
+            </div>
+          )}
+          {salesFilter === "pickyear" && (
+            <div style={{ marginBottom: 12, display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {Array.from({ length: 5 }, (_, i) => new Date().getFullYear() - i).map(yr => (
+                <button key={yr} onClick={() => setSalesPickYear(String(yr))} style={{ padding: "8px 16px", background: salesPickYear === String(yr) ? "#3b82f6" : "#f1f5f9", border: "1px solid", borderColor: salesPickYear === String(yr) ? "#3b82f6" : "#e2e8f0", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", color: salesPickYear === String(yr) ? "#fff" : "#1e293b" }}>{yr}</button>
+              ))}
+            </div>
+          )}
+
+          {/* Summary Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12, marginBottom: 24 }}>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Jumlah Jualan</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#22c55e" }}>{formatRM(totalSalesFilter)}</div>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Bilangan Order</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#3b82f6" }}>{salesByFilter.length}</div>
+            </div>
+            <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 4 }}>Purata Per Order</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "#f59e0b" }}>{formatRM(salesByFilter.length ? totalSalesFilter / salesByFilter.length : 0)}</div>
+            </div>
+          </div>
+
+          {/* Daily Breakdown */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16, marginBottom: 20 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>Jualan Mengikut Hari</div>
+            {Object.keys(salesByDay).length === 0 && <div style={{ color: "#94a3b8", fontSize: 13 }}>Tiada data</div>}
+            {Object.entries(salesByDay).sort((a,b) => new Date(b[0]) - new Date(a[0])).map(([day, data]) => (
+              <div key={day} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f1f5f9" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b" }}>{day}</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>{data.count} order</div>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: "#22c55e" }}>{formatRM(data.total)}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Top Items */}
+          <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 16 }}>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>Item Paling Laris</div>
+            {(() => {
+              const itemCount = {};
+              salesByFilter.forEach(o => o.cart.forEach(i => {
+                if (!itemCount[i.name]) itemCount[i.name] = { qty: 0, total: 0, emoji: i.emoji };
+                itemCount[i.name].qty += i.qty;
+                itemCount[i.name].total += i.price * i.qty;
+              }));
+              const sorted = Object.entries(itemCount).sort((a,b) => b[1].qty - a[1].qty).slice(0,10);
+              if (sorted.length === 0) return <div style={{ color: "#94a3b8", fontSize: 13 }}>Tiada data</div>;
+              return sorted.map(([name, data], i) => (
+                <div key={name} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: "1px solid #f1f5f9" }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", minWidth: 20 }}>#{i+1}</div>
+                  <div style={{ fontSize: 18 }}>{data.emoji}</div>
+                  <div style={{ flex: 1, fontSize: 13, fontWeight: 600, color: "#1e293b" }}>{name}</div>
+                  <div style={{ fontSize: 12, color: "#64748b" }}>{data.qty}x</div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#22c55e" }}>{formatRM(data.total)}</div>
+                </div>
+              ));
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ══ SETTINGS PAGE ══ */}
+      {page === "settings" && (
+        <div style={{ display: "flex", height: "calc(100vh - 56px)" }}>
+          {/* Settings sidebar */}
+          <div style={{ width: 180, background: "#1e293b", padding: "16px 10px" }}>
+            {[["menu","🍽️ Menu"],["printers","🖨️ Printer"],["categories","📂 Kategori"],["tables","🪑 Setup Meja"],["tax","💰 Tax / Caj"],["receipt","🧾 Resit"]].map(([k,l]) => (
+              <button key={k} onClick={() => setSettingsTab(k)} style={{ width: "100%", padding: "10px 12px", marginBottom: 4, background: settingsTab === k ? "#f59e0b" : "transparent", border: "none", borderRadius: 8, color: settingsTab === k ? "#000" : "#94a3b8", fontSize: 13, fontWeight: 600, cursor: "pointer", textAlign: "left" }}>{l}</button>
+            ))}
+          </div>
+
+          {/* Settings content */}
+          <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+
+            {/* Menu Tab */}
+            {settingsTab === "menu" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b" }}>🍽️ Pengurusan Menu</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={openAddItem} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Item</button>
+                    <button onClick={openAddCombo} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#000", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Set</button>
+                    <button onClick={exportMenuCSV} style={{ padding: "8px 16px", background: "#10b981", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📤 Export</button>
+                    <button onClick={() => setImportModal(true)} style={{ padding: "8px 16px", background: "#6366f1", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📥 Import</button>
+                  </div>
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>Item Menu ({products.length})</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10, marginBottom: 24 }}>
+                  {products.map(item => {
+                    const cat = categories.find(c => c.id === item.categoryId);
+                    const s = cat?.subcategories.find(x => x.id === item.subcategoryId);
+                    const printer = printers.find(p => p.id === item.printerId);
+                    return (
+                      <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                        <div style={{ fontSize: 28 }}>{item.emoji}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>{item.name}</div>
+                          <div style={{ fontSize: 11, color: "#94a3b8" }}>{cat?.name}{s ? ` › ${s.name}` : ""}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#3b82f6" }}>{formatRM(item.price)}</div>
+                          {printer && <div style={{ fontSize: 10, color: "#f59e0b" }}>🖨️ {printer.name}</div>}
+                        </div>
+                        <div style={{ display: "flex", gap: 5 }}>
+                          <button onClick={() => toggleSoldOut(item.id)} style={{ padding: "5px 9px", background: item.soldOut ? "#fef2f2" : "#f0fdf4", border: "none", borderRadius: 6, color: item.soldOut ? "#ef4444" : "#22c55e", cursor: "pointer", fontSize: 10, fontWeight: 700 }}>{item.soldOut ? "🚫 SOLD" : "✅ ADA"}</button>
+                          <button onClick={() => openEditItem(item)} style={{ padding: "5px 9px", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", cursor: "pointer" }}>✏️</button>
+                          <button onClick={() => delItem(item.id)} style={{ padding: "5px 9px", background: "#fef2f2", border: "none", borderRadius: 6, color: "#ef4444", cursor: "pointer" }}>🗑️</button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>Set/Combo ({combos.length})</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10 }}>
+                  {combos.map(c => (
+                    <div key={c.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                        <div style={{ fontSize: 28 }}>{c.emoji}</div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>{c.name}</div>
+                          <div style={{ fontSize: 14, fontWeight: 700, color: "#f59e0b" }}>{formatRM(c.price)}</div>
+                        </div>
+                        <div style={{ display: "flex", gap: 5 }}>
+                          <button onClick={() => toggleComboSoldOut(c.id)} style={{ padding: "5px 9px", background: c.soldOut ? "#fef2f2" : "#f0fdf4", border: "none", borderRadius: 6, color: c.soldOut ? "#ef4444" : "#22c55e", cursor: "pointer", fontSize: 10, fontWeight: 700 }}>{c.soldOut ? "🚫 SOLD" : "✅ ADA"}</button>
+                          <button onClick={() => openEditCombo(c)} style={{ padding: "5px 9px", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", cursor: "pointer" }}>✏️</button>
+                          <button onClick={() => delCombo(c.id)} style={{ padding: "5px 9px", background: "#fef2f2", border: "none", borderRadius: 6, color: "#ef4444", cursor: "pointer" }}>🗑️</button>
+                        </div>
+                      </div>
+                      <div style={{ background: "#f8fafc", borderRadius: 8, padding: "8px 10px" }}>
+                        {c.items?.map(ci => { const p = products.find(x => x.id === ci.productId); const pr = printers.find(x => x.id === ci.printerId); return p ? <div key={ci.productId} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 2 }}><span>· {p.emoji} {p.name} × {ci.qty}</span>{pr && <span style={{ color: "#f59e0b", fontSize: 10 }}>🖨️ {pr.name}</span>}</div> : null; })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Printers Tab */}
+            {settingsTab === "printers" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b" }}>🖨️ Pengurusan Printer</div>
+                  <button onClick={openAddPrinter} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Tambah Printer</button>
+                </div>
+                {printers.length === 0 && <div style={{ background: "#fff", border: "2px dashed #e2e8f0", borderRadius: 12, padding: 40, textAlign: "center", color: "#94a3b8" }}><div style={{ fontSize: 40, marginBottom: 10 }}>🖨️</div>Belum ada printer</div>}
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {printers.map(p => (
+                    <div key={p.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                        <div style={{ fontSize: 28 }}>{p.type === "bluetooth" ? "📶" : "📡"}</div>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 15, color: "#1e293b" }}>{p.name}</div>
+                          <div style={{ fontSize: 12, color: "#64748b" }}>{p.type === "bluetooth" ? `${p.btType === "ble" ? "BLE" : "Classic"} · ${p.deviceId || "Belum set"}` : `WiFi · ${p.ip || "Belum set"}:${p.port || 9100}`}</div>
+                          <div style={{ fontSize: 11, color: "#f59e0b" }}>📍 {p.location}</div>
+                          <div style={{ display: "flex", gap: 6, marginTop: 3 }}>
+                            <span style={{ fontSize: 10, background: p.role === "cashier" ? "#f0fdf4" : "#fff7ed", color: p.role === "cashier" ? "#166534" : "#92400e", padding: "2px 6px", borderRadius: 4, fontWeight: 600 }}>
+                              {p.role === "cashier" ? "💰 Cashier" : p.role === "kitchen" ? "🍳 Kitchen" : p.role === "bar" ? "🥤 Bar" : "⚙️ Custom"}
+                            </span>
+                            <span style={{ fontSize: 10, background: "#f8fafc", color: "#64748b", padding: "2px 6px", borderRadius: 4 }}>
+                              {p.showPrice ? "💰 + Harga" : "📋 Order Only"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={async () => { toast(`🖨️ Test ${p.name}...`); const o = { cart: [{ _key: "t1", id: 1, name: "Test Item", price: 1, qty: 1, emoji: "🧪" }], subtotal: 1, tax: 0.06, total: 1.06, num: 9999, time: new Date(), tableNo: "Test" }; await doPrint(p, buildOrderSlipBytes(o, p.name, o.cart, p.showPrice, p.printerWidth || "58")); }} style={{ padding: "6px 10px", background: "#f0fdf4", border: "none", borderRadius: 6, color: "#22c55e", cursor: "pointer", fontSize: 12 }}>{printSt[p.id] || "🖨️ Test"}</button>
+                        <button onClick={() => openEditPrinter(p)} style={{ padding: "6px 10px", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", cursor: "pointer" }}>✏️</button>
+                        <button onClick={() => delPrinter(p.id)} style={{ padding: "6px 10px", background: "#fef2f2", border: "none", borderRadius: 6, color: "#ef4444", cursor: "pointer" }}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Categories Tab */}
+            {settingsTab === "categories" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b" }}>📂 Pengurusan Kategori</div>
+                  <button onClick={openAddCat} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Tambah Kategori</button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {categories.map(cat => (
+                    <div key={cat.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
+                      <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <div style={{ fontWeight: 700, color: "#1e293b" }}>{cat.name} <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400 }}>({cat.subcategories.length} sub · {products.filter(p => p.categoryId === cat.id).length} item)</span></div>
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button onClick={() => openAddSub(cat.id)} style={{ padding: "5px 10px", background: "#f0fdf4", border: "none", borderRadius: 6, color: "#22c55e", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>+ Sub</button>
+                          <button onClick={() => openEditCat(cat)} style={{ padding: "5px 9px", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", cursor: "pointer" }}>✏️</button>
+                          <button onClick={() => delCat(cat.id)} style={{ padding: "5px 9px", background: "#fef2f2", border: "none", borderRadius: 6, color: "#ef4444", cursor: "pointer" }}>🗑️</button>
+                        </div>
+                      </div>
+                      {cat.subcategories.length > 0 && (
+                        <div style={{ borderTop: "1px solid #f1f5f9", padding: "8px 16px 12px", display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {cat.subcategories.map(s => (
+                            <div key={s.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "4px 10px", display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 13, color: "#1e293b" }}>{s.name}</span>
+                              <button onClick={() => openEditSub(s, cat.id)} style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: 11 }}>✏️</button>
+                              <button onClick={() => delSub(s.id, cat.id)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11 }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Tables Setup Tab */}
+            {settingsTab === "tables" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b" }}>🪑 Setup Meja ({tables.length} meja)</div>
+                  <button onClick={openAddTable} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Tambah Meja</button>
+                </div>
+                {sections.map(section => (
+                  <div key={section} style={{ marginBottom: 20 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>{section}</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(160px,1fr))", gap: 10 }}>
+                      {tables.filter(t => t.section === section).map(t => (
+                        <div key={t.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                          <div style={{ fontWeight: 600, color: "#1e293b" }}>{t.name}</div>
+                          <div style={{ display: "flex", gap: 5 }}>
+                            <button onClick={() => openEditTable(t)} style={{ padding: "4px 8px", background: "#eff6ff", border: "none", borderRadius: 5, color: "#3b82f6", cursor: "pointer", fontSize: 11 }}>✏️</button>
+                            <button onClick={() => delTable(t.id)} style={{ padding: "4px 8px", background: "#fef2f2", border: "none", borderRadius: 5, color: "#ef4444", cursor: "pointer", fontSize: 11 }}>🗑️</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Tax / Service Charge Tab */}
+            {settingsTab === "tax" && (
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b", marginBottom: 20 }}>💰 Tax / Service Charge</div>
+                <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: 20, maxWidth: 480 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, paddingBottom: 20, borderBottom: "1px solid #f1f5f9" }}>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b" }}>Aktifkan Tax / Caj</div>
+                      <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>Bila dimatikan, tiada tax dikenakan dan tak keluar kat resit</div>
+                    </div>
+                    <button onClick={() => setTaxConfig(c => ({ ...c, enabled: !c.enabled }))}
+                      style={{ width: 52, height: 28, borderRadius: 14, border: "none", cursor: "pointer", background: taxConfig.enabled ? "#22c55e" : "#e2e8f0", position: "relative", transition: "background .2s" }}>
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: "#fff", position: "absolute", top: 3, left: taxConfig.enabled ? 27 : 3, transition: "left .2s", boxShadow: "0 1px 4px rgba(0,0,0,.2)" }} />
+                    </button>
+                  </div>
+                  <div style={{ marginBottom: 16, opacity: taxConfig.enabled ? 1 : 0.4 }}>
+                    <label style={{ fontSize: 13, color: "#475569", marginBottom: 6, display: "block", fontWeight: 600 }}>Nama Caj (contoh: SST, GST, Service Charge)</label>
+                    <input value={taxConfig.label} onChange={e => setTaxConfig(c => ({ ...c, label: e.target.value }))} disabled={!taxConfig.enabled} placeholder="SST"
+                      style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", fontSize: 14, outline: "none", boxSizing: "border-box", background: "#fff", color: "#1e293b" }} />
+                  </div>
+                  <div style={{ marginBottom: 20, opacity: taxConfig.enabled ? 1 : 0.4 }}>
+                    <label style={{ fontSize: 13, color: "#475569", marginBottom: 6, display: "block", fontWeight: 600 }}>Kadar (%)</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <input type="number" value={taxConfig.rate} onChange={e => setTaxConfig(c => ({ ...c, rate: parseFloat(e.target.value) || 0 }))} disabled={!taxConfig.enabled} min="0" max="100" step="0.5"
+                        style={{ width: 100, border: "1px solid #cbd5e1", borderRadius: 8, padding: "10px 12px", fontSize: 16, fontWeight: 700, outline: "none", background: "#fff", color: "#1e293b" }} />
+                      <span style={{ fontSize: 16, color: "#1e293b", fontWeight: 600 }}>%</span>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {[6, 8, 10].map(r => (
+                          <button key={r} onClick={() => setTaxConfig(c => ({ ...c, rate: r }))} disabled={!taxConfig.enabled}
+                            style={{ padding: "6px 12px", background: taxConfig.rate === r ? "#3b82f6" : "#f1f5f9", border: "1px solid", borderColor: taxConfig.rate === r ? "#3b82f6" : "#e2e8f0", borderRadius: 6, color: taxConfig.rate === r ? "#fff" : "#1e293b", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>{r}%</button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14 }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>PREVIEW (contoh: RM 10.00)</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#1e293b", marginBottom: 3 }}><span>Subtotal</span><span>RM 10.00</span></div>
+                    {taxConfig.enabled && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#64748b", marginBottom: 3 }}><span>{taxConfig.label || "Tax"} ({taxConfig.rate}%)</span><span>{formatRM(10 * taxConfig.rate / 100)}</span></div>}
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, color: "#1e293b", borderTop: "1px solid #e2e8f0", paddingTop: 8, marginTop: 5 }}><span>JUMLAH</span><span>{taxConfig.enabled ? formatRM(10 + 10 * taxConfig.rate / 100) : "RM 10.00"}</span></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Receipt Tab */}
+            {settingsTab === "receipt" && (
+              <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 16 }}>🧾 Tetapan Resit</div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={S.lbl}>Nama Kedai</label>
+                  <input value={receiptConfig.shopName} onChange={e => setReceiptConfig(c => ({ ...c, shopName: e.target.value }))} placeholder="WARUNG DIGITAL" style={S.inp} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={S.lbl}>No. Telefon</label>
+                  <input value={receiptConfig.phone} onChange={e => setReceiptConfig(c => ({ ...c, phone: e.target.value }))} placeholder="03-1234 5678" style={S.inp} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={S.lbl}>Alamat (optional)</label>
+                  <input value={receiptConfig.address} onChange={e => setReceiptConfig(c => ({ ...c, address: e.target.value }))} placeholder="No 1, Jalan Warung, KL" style={S.inp} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={S.lbl}>Footer Resit</label>
+                  <input value={receiptConfig.footer} onChange={e => setReceiptConfig(c => ({ ...c, footer: e.target.value }))} placeholder="Terima Kasih! Sila Datang Lagi" style={S.inp} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <label style={S.lbl}>Logo Kedai (akan print atas resit)</label>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    {receiptConfig.logoBase64 ? (
+                      <div style={{ position: "relative", display: "inline-block" }}>
+                        <img src={receiptConfig.logoBase64} alt="Logo" style={{ width: 80, height: 80, objectFit: "contain", borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                        <button onClick={() => setReceiptConfig(c => ({ ...c, logoBase64: "" }))} style={{ position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: "50%", background: "#ef4444", border: "none", color: "#fff", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>✕</button>
+                      </div>
+                    ) : (
+                      <div style={{ width: 80, height: 80, borderRadius: 8, border: "2px dashed #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 11 }}>Tiada Logo</div>
+                    )}
+                    <label style={{ padding: "8px 14px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
+                      📁 Upload Logo
+                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+                        const reader = new FileReader();
+                        reader.onload = ev => setReceiptConfig(c => ({ ...c, logoBase64: ev.target.result }));
+                        reader.readAsDataURL(file);
+                      }} />
+                    </label>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>PNG/JPG, max 200KB. Logo akan print sebagai teks ASCII art (thermal printer).</div>
+                  </div>
+                </div>
+                {/* Preview */}
+                <div style={{ background: "#f8fafc", borderRadius: 8, padding: 14, border: "1px solid #e2e8f0", fontFamily: "monospace", fontSize: 11, whiteSpace: "pre", lineHeight: 1.6, color: "#1e293b" }}>
+                  {[
+                    receiptConfig.shopName || "WARUNG DIGITAL",
+                    receiptConfig.phone || "",
+                    receiptConfig.address || "",
+                    "--------------------------------",
+                    "No: #1234  23/5/2026, 3:00:00 PTG",
+                    "Meja: Meja 1",
+                    "Jenis: Dine In",
+                    "--------------------------------",
+                    "Nasi Lemak x1              RM5.50",
+                    "Teh Tarik x1               RM2.50",
+                    "--------------------------------",
+                    "Subtotal               RM 8.00",
+                    "SST (6%)               RM 0.48",
+                    "JUMLAH                 RM 8.48",
+                    "--------------------------------",
+                    receiptConfig.footer || "Terima Kasih! Sila Datang Lagi",
+                  ].filter(Boolean).join("\n")}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      {/* ══ MODALS ══ */}
+
+      {/* Item Modal */}
+      {itemModal && (
+        <div style={S.modal} onClick={() => setItemModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#1e293b" }}>{editItem ? "✏️ Edit Item" : "➕ Tambah Item"}</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Emoji</label>
+              <button onClick={() => setEmojiPick(!emojiPick)} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 14px", fontSize: 22, cursor: "pointer" }}>{itemF.emoji}</button>
+              {emojiPick && <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>{EMOJIS.map(e => <button key={e} onClick={() => { setItemF(f => ({ ...f, emoji: e })); setEmojiPick(false); }} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>{e}</button>)}</div>}
+            </div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Nama Item</label><input value={itemF.name} onChange={e => setItemF(f => ({ ...f, name: e.target.value }))} placeholder="Contoh: Nasi Lemak" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Harga (RM)</label><input type="number" value={itemF.price} onChange={e => setItemF(f => ({ ...f, price: e.target.value }))} placeholder="0.00" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Kategori</label><select value={itemF.categoryId} onChange={e => setItemF(f => ({ ...f, categoryId: e.target.value, subcategoryId: categories.find(c => c.id === e.target.value)?.subcategories[0]?.id || "" }))} style={S.sel}>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Sub-kategori</label><select value={itemF.subcategoryId} onChange={e => setItemF(f => ({ ...f, subcategoryId: e.target.value }))} style={S.sel}><option value="">-- Tiada --</option>{itemSubs.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}</select></div>
+            <div style={{ marginBottom: 18 }}><label style={S.lbl}>🖨️ Print ke Printer</label><select value={itemF.printerId} onChange={e => setItemF(f => ({ ...f, printerId: e.target.value }))} style={S.sel}><option value="">-- Ikut cashier --</option>{printers.map(p => <option key={p.id} value={p.id}>{p.name} ({p.location})</option>)}</select></div>
+            {/* Variants */}
+            <div style={{ marginBottom: 18 }}>
+              <label style={S.lbl}>🔀 Varian (optional) — kalau ada, wajib pilih masa order</label>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                {(itemF.variants || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Tiada varian — item terus masuk cart</div>}
+                <div style={{ display: "flex", gap: 6, marginBottom: 4 }}>
+                  {(itemF.variants || []).length > 0 && <>
+                    <div style={{ flex: 2, fontSize: 10, color: "#64748b", fontWeight: 600, paddingLeft: 2 }}>Nama Varian</div>
+                    <div style={{ flex: 1, fontSize: 10, color: "#64748b", fontWeight: 600, paddingLeft: 2 }}>+ Harga (RM)</div>
+                    <div style={{ width: 24 }}></div>
+                  </>}
+                </div>
+                {(itemF.variants || []).map((v, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <input value={v.name} onChange={e => setItemF(f => ({ ...f, variants: f.variants.map((x, i) => i === idx ? { ...x, name: e.target.value } : x) }))} placeholder="cth: Ais, Panas, Pedas" style={{ ...S.inp, flex: 2, padding: "6px 10px", fontSize: 12, marginBottom: 0 }} />
+                    <input type="number" value={v.extraPrice ?? 0} onChange={e => setItemF(f => ({ ...f, variants: f.variants.map((x, i) => i === idx ? { ...x, extraPrice: parseFloat(e.target.value) || 0 } : x) }))} placeholder="0" style={{ ...S.inp, flex: 1, padding: "6px 10px", fontSize: 12, marginBottom: 0 }} />
+                    <button onClick={() => setItemF(f => ({ ...f, variants: f.variants.filter((_, i) => i !== idx) }))} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16, width: 24 }}>✕</button>
+                  </div>
+                ))}
+                <button onClick={() => setItemF(f => ({ ...f, variants: [...(f.variants || []), { name: "", extraPrice: 0 }] }))} style={{ padding: "5px 12px", background: "#f1f5f9", border: "1px dashed #94a3b8", borderRadius: 6, fontSize: 12, cursor: "pointer", color: "#64748b", fontWeight: 600, marginTop: 4 }}>+ Tambah Varian</button>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setItemModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={saveItem} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Variant Selection Modal */}
+      {variantModal && variantItem && (
+        <div style={S.modal} onClick={() => setVariantModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 340 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, marginBottom: 4, textAlign: "center" }}>{variantItem.emoji}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 4, color: "#1e293b", textAlign: "center" }}>{variantItem.name}</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16, textAlign: "center" }}>Pilih varian:</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {variantItem.variants.map((v, idx) => (
+                <button key={idx} onClick={() => setSelectedVariant(v)}
+                  style={{ padding: "12px 16px", background: selectedVariant?.name === v.name ? "#eff6ff" : "#f8fafc", border: `2px solid ${selectedVariant?.name === v.name ? "#3b82f6" : "#e2e8f0"}`, borderRadius: 10, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 14 }}>{v.name}</span>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontWeight: 700, color: "#3b82f6", fontSize: 14 }}>{formatRM(variantItem.price + (v.extraPrice || 0))}</div>
+                    {(v.extraPrice || 0) > 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>+{formatRM(v.extraPrice)}</div>}
+                    {(v.extraPrice || 0) === 0 && <div style={{ fontSize: 10, color: "#94a3b8" }}>tiada tambahan</div>}
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setVariantModal(false)} style={{ flex: 1, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={() => { if (!selectedVariant) return; addCartDirect(variantItem, false, selectedVariant); setVariantModal(false); setVariantItem(null); }}
+                disabled={!selectedVariant}
+                style={{ flex: 2, padding: 10, background: selectedVariant ? "#3b82f6" : "#e2e8f0", border: "none", borderRadius: 8, color: selectedVariant ? "#fff" : "#94a3b8", fontWeight: 700, cursor: selectedVariant ? "pointer" : "not-allowed", fontSize: 14 }}>
+                ✅ Tambah ke Cart
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Open Shift Modal ── */}
+      {shiftModal && (
+        <div style={S.modal} onClick={() => setShiftModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 20, textAlign: "center", marginBottom: 4 }}>▶️</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#1e293b", textAlign: "center", marginBottom: 16 }}>Buka Shift Baru</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Nama Shift / Petugas</label>
+              <input value={shiftF.name} onChange={e => setShiftF(f => ({ ...f, name: e.target.value }))} placeholder="cth: Pagi - Ali, Shift 1" style={S.inp} autoFocus />
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={S.lbl}>Duit Float (RM) — duit dalam drawer masa buka</label>
+              <input type="number" value={shiftF.float} onChange={e => setShiftF(f => ({ ...f, float: e.target.value }))} placeholder="0.00" style={S.inp} />
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setShiftModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", fontWeight: 600, cursor: "pointer" }}>Batal</button>
+              <button onClick={openShift} style={{ flex: 2, padding: 12, background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>▶ Buka Shift</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Close Shift Modal ── */}
+      {closeShiftModal && currentShift && (
+        <div style={S.modal} onClick={() => setCloseShiftModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 20, textAlign: "center", marginBottom: 4 }}>⏹️</div>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#1e293b", textAlign: "center", marginBottom: 4 }}>Tutup Shift</div>
+            <div style={{ fontSize: 13, color: "#64748b", textAlign: "center", marginBottom: 16 }}>{currentShift.name}</div>
+            {(() => {
+              const shiftOrders = salesHistory.filter(o => currentShift.orders.includes(o.num));
+              const cashSales = shiftOrders.filter(o => o.method === "cash").reduce((s, o) => s + o.total, 0);
+              const qrSales = shiftOrders.filter(o => o.method === "qr").reduce((s, o) => s + o.total, 0);
+              const cardSales = shiftOrders.filter(o => o.method === "card").reduce((s, o) => s + o.total, 0);
+              const expectedCash = currentShift.openFloat + cashSales;
+              const actual = parseFloat(closeF.actualCash) || 0;
+              const diff = actual - expectedCash;
+              return (
+                <div>
+                  <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 13 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: "#64748b" }}>Bil. Order</span><span style={{ fontWeight: 600 }}>{shiftOrders.length}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: "#64748b" }}>Jualan Cash</span><span style={{ fontWeight: 600, color: "#22c55e" }}>{formatRM(cashSales)}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: "#64748b" }}>Jualan QR</span><span style={{ fontWeight: 600, color: "#3b82f6" }}>{formatRM(qrSales)}</span></div>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}><span style={{ color: "#64748b" }}>Jualan Kad</span><span style={{ fontWeight: 600, color: "#8b5cf6" }}>{formatRM(cardSales)}</span></div>
+                    <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 6, marginTop: 4, display: "flex", justifyContent: "space-between" }}><span style={{ fontWeight: 700 }}>Jumlah Jualan</span><span style={{ fontWeight: 700 }}>{formatRM(cashSales + qrSales + cardSales)}</span></div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={S.lbl}>Duit Cash Sebenar dalam Drawer (RM)</label>
+                    <input type="number" value={closeF.actualCash} onChange={e => setCloseF(f => ({ ...f, actualCash: e.target.value }))} placeholder={formatRM(expectedCash)} style={S.inp} autoFocus />
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Dijangka: {formatRM(expectedCash)} (Float {formatRM(currentShift.openFloat)} + Cash {formatRM(cashSales)})</div>
+                  </div>
+                  {closeF.actualCash && (
+                    <div style={{ padding: "8px 12px", borderRadius: 8, marginBottom: 12, background: diff === 0 ? "#f0fdf4" : diff > 0 ? "#eff6ff" : "#fff7ed", border: `1px solid ${diff === 0 ? "#86efac" : diff > 0 ? "#93c5fd" : "#fcd34d"}` }}>
+                      <span style={{ fontWeight: 700, color: diff === 0 ? "#16a34a" : diff > 0 ? "#1d4ed8" : "#b45309" }}>
+                        {diff === 0 ? "✅ Tepat!" : diff > 0 ? `↑ Lebih ${formatRM(diff)}` : `↓ Kurang ${formatRM(Math.abs(diff))}`}
+                      </span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setCloseShiftModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", fontWeight: 600, cursor: "pointer" }}>Batal</button>
+                    <button onClick={closeShift} style={{ flex: 2, padding: 12, background: "#ef4444", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>⏹ Tutup & Print Report</button>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
+      {/* ── Import Menu Modal ── */}
+      {importModal && (
+        <div style={S.modal} onClick={() => setImportModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 400 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>📥 Import Menu dari CSV</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Upload file CSV dengan format yang betul. Item yang nama sama akan dilangkau.</div>
+            <div style={{ background: "#f8fafc", borderRadius: 8, padding: 12, marginBottom: 14, fontSize: 11, fontFamily: "monospace", color: "#475569" }}>
+              <div style={{ fontWeight: 700, marginBottom: 4 }}>Format CSV:</div>
+              <div>Nama, Harga, Kategori, Sub-Kategori, Emoji, Printer ID</div>
+              <div style={{ color: "#94a3b8", marginTop: 4 }}>* Kategori mesti sama dengan yang ada dalam app</div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <button onClick={downloadMenuTemplate} style={{ flex: 1, padding: "10px 0", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, color: "#475569", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>⬇️ Download Template</button>
+              <button onClick={exportMenuCSV} style={{ flex: 1, padding: "10px 0", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, color: "#475569", fontWeight: 600, fontSize: 12, cursor: "pointer" }}>📤 Export Menu Semasa</button>
+            </div>
+            <label style={{ display: "block", padding: "14px 0", background: "#eff6ff", border: "2px dashed #93c5fd", borderRadius: 8, textAlign: "center", cursor: "pointer", color: "#1d4ed8", fontWeight: 700, fontSize: 14 }}>
+              📁 Pilih File CSV untuk Import
+              <input type="file" accept=".csv,text/csv" style={{ display: "none" }} onChange={e => importMenuCSV(e.target.files?.[0])} />
+            </label>
+            <button onClick={() => setImportModal(false)} style={{ width: "100%", marginTop: 10, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Tutup</button>
+          </div>
+        </div>
+      )}
+
+      {/* Category Modal */}
+      {catModal && (
+        <div style={S.modal} onClick={() => setCatModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editCat ? "✏️ Edit Kategori" : "➕ Tambah Kategori"}</div>
+            <div style={{ marginBottom: 18 }}><label style={S.lbl}>Nama</label><input value={catF.name} onChange={e => setCatF({ name: e.target.value })} placeholder="Contoh: Makanan" style={S.inp} /></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setCatModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={saveCat} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-category Modal */}
+      {subModal && (
+        <div style={S.modal} onClick={() => setSubModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editSub ? "✏️ Edit Sub-kategori" : "➕ Tambah Sub-kategori"}</div>
+            <div style={{ marginBottom: 8 }}><label style={S.lbl}>Dalam Kategori</label><div style={{ fontWeight: 700, color: "#3b82f6" }}>{categories.find(c => c.id === subF.catId)?.name}</div></div>
+            <div style={{ marginBottom: 18 }}><label style={S.lbl}>Nama</label><input value={subF.name} onChange={e => setSubF(f => ({ ...f, name: e.target.value }))} placeholder="Contoh: Nasi" style={S.inp} /></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setSubModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={saveSub} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Printer Modal */}
+      {printerModal && (
+        <div style={S.modal} onClick={() => setPrinterModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editPrinter ? "✏️ Edit Printer" : "➕ Tambah Printer"}</div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Nama Printer</label><input value={pF.name} onChange={e => setPF(f => ({ ...f, name: e.target.value }))} placeholder="Contoh: Printer Dapur" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Lokasi</label><input value={pF.location} onChange={e => setPF(f => ({ ...f, location: e.target.value }))} placeholder="Dapur / Bar / Kaunter" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Role Printer</label>
+              <select value={pF.role} onChange={e => setPF(f => ({ ...f, role: e.target.value }))} style={S.sel}>
+                <option value="cashier">💰 Cashier — Print resit penuh masa bayar</option>
+                <option value="kitchen">🍳 Kitchen — Print slip order masa create order</option>
+                <option value="bar">🥤 Bar — Print slip order masa create order</option>
+                <option value="custom">⚙️ Custom — Ikut assignment item</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Saiz Kertas Printer</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["58", "58mm (Standard)"], ["80", "80mm (Lebar)"]].map(([w, l]) => (
+                  <button key={w} onClick={() => setPF(f => ({ ...f, printerWidth: w }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: (pF.printerWidth || "58") === w ? "#3b82f6" : "#f8fafc", color: (pF.printerWidth || "58") === w ? "#fff" : "#64748b", borderColor: (pF.printerWidth || "58") === w ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {pF.role !== "cashier" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={S.lbl}>Kandungan Slip</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setPF(f => ({ ...f, showPrice: false }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: !pF.showPrice ? "#3b82f6" : "#f8fafc", color: !pF.showPrice ? "#fff" : "#64748b", borderColor: !pF.showPrice ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>📋 Order Only</button>
+                  <button onClick={() => setPF(f => ({ ...f, showPrice: true }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: pF.showPrice ? "#3b82f6" : "#f8fafc", color: pF.showPrice ? "#fff" : "#64748b", borderColor: pF.showPrice ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>💰 Order + Harga</button>
+                </div>
+              </div>
+            )}
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Jenis Sambungan</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["bluetooth", "📶 Bluetooth"], ["wifi", "📡 WiFi"]].map(([t, l]) => (
+                  <button key={t} onClick={() => setPF(f => ({ ...f, type: t }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: pF.type === t ? "#3b82f6" : "#f8fafc", color: pF.type === t ? "#fff" : "#64748b", borderColor: pF.type === t ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {pF.type === "wifi" && <>
+              <div style={{ marginBottom: 12 }}><label style={S.lbl}>IP Address</label><input value={pF.ip} onChange={e => setPF(f => ({ ...f, ip: e.target.value }))} placeholder="192.168.1.100" style={S.inp} /></div>
+              <div style={{ marginBottom: 14 }}><label style={S.lbl}>Port (default: 9100)</label><input value={pF.port} onChange={e => setPF(f => ({ ...f, port: e.target.value }))} placeholder="9100" style={S.inp} /></div>
+            </>}
+            {pF.type === "bluetooth" && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={S.lbl}>Jenis Bluetooth</label>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={() => setPF(f => ({ ...f, btType: "classic" }))} style={{ flex: 1, padding: "10px 8px", border: "2px solid", borderRadius: 8, cursor: "pointer", background: (pF.btType || "classic") === "classic" ? "#3b82f6" : "#f8fafc", color: (pF.btType || "classic") === "classic" ? "#fff" : "#64748b", borderColor: (pF.btType || "classic") === "classic" ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 12 }}>
+                      🖨️ Classic<br /><span style={{ fontSize: 10, fontWeight: 400 }}>MPT-11, Zywell, Epson</span>
+                    </button>
+                    <button onClick={() => setPF(f => ({ ...f, btType: "ble" }))} style={{ flex: 1, padding: "10px 8px", border: "2px solid", borderRadius: 8, cursor: "pointer", background: pF.btType === "ble" ? "#3b82f6" : "#f8fafc", color: pF.btType === "ble" ? "#fff" : "#64748b", borderColor: pF.btType === "ble" ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 12 }}>
+                      📶 BLE<br /><span style={{ fontSize: 10, fontWeight: 400 }}>Printer BLE baru</span>
+                    </button>
+                  </div>
+                </div>
+                <label style={S.lbl}>Device ID / MAC Address</label>
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  <input value={pF.deviceId} onChange={e => setPF(f => ({ ...f, deviceId: e.target.value }))} placeholder="AA:BB:CC:DD:EE:FF" style={{ ...S.inp, flex: 1 }} />
+                  <button onClick={doScan} disabled={scanning} style={{ padding: "10px 12px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>{scanning ? "⏳" : "📡 Scan"}</button>
+                </div>
+                {btDevs.length > 0 && (
+                  <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, maxHeight: 110, overflowY: "auto" }}>
+                    <div style={{ fontSize: 11, color: "#64748b", marginBottom: 4 }}>Tap untuk pilih:</div>
+                    {btDevs.map(d => <button key={d.deviceId} onClick={() => setPF(f => ({ ...f, deviceId: d.deviceId }))} style={{ width: "100%", textAlign: "left", background: pF.deviceId === d.deviceId ? "#eff6ff" : "none", border: "none", borderRadius: 6, padding: "5px 8px", color: "#1e293b", cursor: "pointer", fontSize: 12, marginBottom: 2 }}>📶 {d.name} <span style={{ color: "#94a3b8" }}>({d.deviceId})</span></button>)}
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setPrinterModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={savePrinter} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Combo Modal */}
+      {comboModal && (
+        <div style={S.modal} onClick={() => setComboModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editCombo ? "✏️ Edit Set/Combo" : "➕ Tambah Set/Combo"}</div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Emoji</label>
+              <button onClick={() => setEmojiPickCombo(!emojiPickCombo)} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "7px 14px", fontSize: 22, cursor: "pointer" }}>{comboF.emoji}</button>
+              {emojiPickCombo && <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 100, overflowY: "auto" }}>{EMOJIS.map(e => <button key={e} onClick={() => { setComboF(f => ({ ...f, emoji: e })); setEmojiPickCombo(false); }} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>{e}</button>)}</div>}
+            </div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Nama Set</label><input value={comboF.name} onChange={e => setComboF(f => ({ ...f, name: e.target.value }))} placeholder="Set Burger Double" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Harga Set (RM)</label><input type="number" value={comboF.price} onChange={e => setComboF(f => ({ ...f, price: e.target.value }))} placeholder="0.00" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Keterangan</label><input value={comboF.description} onChange={e => setComboF(f => ({ ...f, description: e.target.value }))} placeholder="Burger + Air + Fries" style={S.inp} /></div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Item dalam Set — assign printer setiap item</label>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 200, overflowY: "auto" }}>
+                {comboF.items.length === 0 && (comboF.customItems || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Belum ada item</div>}
+                {comboF.items.map(ci => {
+                  const p = products.find(x => x.id === ci.productId);
+                  return p ? (
+                    <div key={ci.productId} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, background: "#fff", borderRadius: 8, padding: "6px 8px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: 16 }}>{p.emoji}</span>
+                      <span style={{ fontSize: 13, flex: 1, fontWeight: 600 }}>{p.name}</span>
+                      <span style={{ fontSize: 11, color: "#64748b" }}>×{ci.qty}</span>
+                      <select value={ci.printerId || ""} onChange={e => setComboF(f => ({ ...f, items: f.items.map(i => i.productId === ci.productId ? { ...i, printerId: e.target.value } : i) }))}
+                        style={{ fontSize: 11, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, color: "#1e293b", padding: "3px 5px", maxWidth: 110 }}>
+                        <option value="">🖨️ Printer</option>
+                        {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                      </select>
+                      <button onClick={() => removeComboItem(ci.productId)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                  ) : null;
+                })}
+                {(comboF.customItems || []).map(ci => (
+                  <div key={ci.customId} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, background: "#fff7ed", borderRadius: 8, padding: "6px 8px", border: "1px solid #f59e0b" }}>
+                    <span style={{ fontSize: 16 }}>✏️</span>
+                    <span style={{ fontSize: 13, flex: 1, fontWeight: 600 }}>{ci.name}</span>
+                    <span style={{ fontSize: 10, color: "#f59e0b", background: "#fff", borderRadius: 4, padding: "1px 5px", border: "1px solid #f59e0b" }}>Custom</span>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>×{ci.qty}</span>
+                    <select value={ci.printerId || ""} onChange={e => setComboF(f => ({ ...f, customItems: (f.customItems || []).map(i => i.customId === ci.customId ? { ...i, printerId: e.target.value } : i) }))}
+                      style={{ fontSize: 11, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, color: "#1e293b", padding: "3px 5px", maxWidth: 110 }}>
+                      <option value="">🖨️ Printer</option>
+                      {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                    </select>
+                    <button onClick={() => removeCustomComboItem(ci.customId)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>Tambah item (pilih dari dropdown):</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <select value={comboDropdownVal} onChange={e => { const val = e.target.value; if (val) { addComboItem(val); setComboDropdownVal(""); } else { setComboDropdownVal(""); } }}
+                  style={{ ...S.sel, flex: 1, fontSize: 13 }}>
+                  <option value="">— Pilih item untuk tambah —</option>
+                  {categories.map(cat => (
+                    <optgroup key={cat.id} label={cat.name}>
+                      {products.filter(p => p.categoryId === cat.id).map(p => {
+                        const added = comboF.items.find(i => i.productId === p.id);
+                        return <option key={p.id} value={p.id}>{p.emoji} {p.name} {added ? `(✓${added.qty})` : ""}</option>;
+                      })}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              {/* Custom item — tak ada dalam menu */}
+              <div style={{ borderTop: "1px dashed #e2e8f0", paddingTop: 8 }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>➕ Tambah item custom (khusus untuk set ini):</div>
+                {!showCustomItemForm ? (
+                  <button onClick={() => setShowCustomItemForm(true)} style={{ padding: "6px 14px", background: "#fff7ed", border: "1px dashed #f59e0b", borderRadius: 8, color: "#92400e", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✏️ + Item Custom</button>
+                ) : (
+                  <div style={{ background: "#fff7ed", border: "1px solid #f59e0b", borderRadius: 8, padding: 10 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ ...S.lbl, fontSize: 11 }}>Nama Item</label>
+                      <input value={customItemF.name} onChange={e => setCustomItemF(f => ({ ...f, name: e.target.value }))} placeholder="cth: Sos Cili Extra, Double Patty..." style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ ...S.lbl, fontSize: 11 }}>Qty</label>
+                        <input type="number" min="1" value={customItemF.qty} onChange={e => setCustomItemF(f => ({ ...f, qty: e.target.value }))} style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }} />
+                      </div>
+                      <div style={{ flex: 2 }}>
+                        <label style={{ ...S.lbl, fontSize: 11 }}>Printer</label>
+                        <select value={customItemF.printerId} onChange={e => setCustomItemF(f => ({ ...f, printerId: e.target.value }))} style={{ ...S.sel, fontSize: 12, padding: "7px 10px" }}>
+                          <option value="">— Pilih Printer —</option>
+                          {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => { setShowCustomItemForm(false); setCustomItemF({ name: "", printerId: "", qty: "1" }); }} style={{ flex: 1, padding: "7px 0", background: "#f1f5f9", border: "none", borderRadius: 6, color: "#64748b", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Batal</button>
+                      <button onClick={addCustomComboItem} style={{ flex: 2, padding: "7px 0", background: "#f59e0b", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>✅ Tambah</button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button onClick={() => setComboModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={saveCombo} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table Modal */}
+      {tableSetupModal && (
+        <div style={S.modal} onClick={() => setTableSetupModal(false)}>
+          <div style={S.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16 }}>{editTable ? "✏️ Edit Meja" : "➕ Tambah Meja"}</div>
+            <div style={{ marginBottom: 12 }}><label style={S.lbl}>Nama Meja</label><input value={tableF.name} onChange={e => setTableF(f => ({ ...f, name: e.target.value }))} placeholder="Contoh: Meja 9" style={S.inp} /></div>
+            <div style={{ marginBottom: 18 }}><label style={S.lbl}>Bahagian</label><input value={tableF.section} onChange={e => setTableF(f => ({ ...f, section: e.target.value }))} placeholder="Dalam / Luar / VIP" style={S.inp} /></div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => setTableSetupModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={saveTable} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Simpan</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── EDIT ORDER MODAL ── */}
+      {editOrderKey && activeOrders[editOrderKey] && editOrderDraft !== null && (
+        <div style={S.modal} onClick={() => { setEditOrderKey(null); setEditOrderDraft(null); setEditOrderNewItems([]); }}>
+          <div style={{ ...S.mbox, maxWidth: 680, maxHeight: "92vh", display: "flex", flexDirection: "column" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>✏️ Edit Order — {activeOrders[editOrderKey].tableNo} <span style={{ color: "#64748b", fontSize: 13 }}>#{activeOrders[editOrderKey].num}</span></div>
+              <button onClick={() => { setEditOrderKey(null); setEditOrderDraft(null); setEditOrderNewItems([]); }} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {/* Draft badge */}
+            {editOrderNewItems.length > 0 && (
+              <div style={{ background: "#fef9c3", border: "1px solid #f59e0b", borderRadius: 8, padding: "6px 12px", marginBottom: 10, fontSize: 12, color: "#92400e" }}>
+                ⚡ {editOrderNewItems.length} item baru akan auto-print ke dapur/bar bila selesai
+              </div>
+            )}
+
+            {/* Current items in draft */}
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 12, marginBottom: 14, maxHeight: 180, overflowY: "auto" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>ITEM DALAM ORDER</div>
+              {editOrderDraft.length === 0 && <div style={{ fontSize: 12, color: "#f87171", fontWeight: 600 }}>⚠️ Kosong — order akan dibuang bila Selesai Edit</div>}
+              {editOrderDraft.map(i => (
+                <div key={i._key} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, background: "#fff", borderRadius: 8, padding: "6px 10px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: 18 }}>{i.emoji}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>{i.name}</div>
+                    <div style={{ fontSize: 12, color: "#3b82f6" }}>{formatRM(i.price)}</div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    <button onClick={() => editOrderRemoveItem(i._key)} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>−</button>
+                    <span style={{ fontSize: 13, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{i.qty}</span>
+                    <button onClick={() => editOrderAddItem(i.isCombo ? (combos.find(c => c.id === i.id) || i) : (products.find(p => p.id === i.id) || i), i.isCombo)} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>+</button>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, minWidth: 58, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
+                </div>
+              ))}
+              {editOrderDraft.length > 0 && (
+                <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: 15, fontWeight: 700 }}>Jumlah: {formatRM(editOrderDraft.reduce((s, i) => s + i.price * i.qty, 0) * (1 + taxRate))}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Add new items */}
+            <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>TAMBAH ITEM</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+              <button onClick={() => { setEditOrderCat("all"); setEditOrderShowCombos(false); }} style={{ padding: "4px 12px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: editOrderCat === "all" && !editOrderShowCombos ? "#3b82f6" : "#f8fafc", color: editOrderCat === "all" && !editOrderShowCombos ? "#fff" : "#64748b", borderColor: editOrderCat === "all" && !editOrderShowCombos ? "#3b82f6" : "#e2e8f0" }}>Semua</button>
+              <button onClick={() => setEditOrderShowCombos(true)} style={{ padding: "4px 12px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: editOrderShowCombos ? "#f59e0b" : "#f8fafc", color: editOrderShowCombos ? "#000" : "#64748b", borderColor: editOrderShowCombos ? "#f59e0b" : "#e2e8f0" }}>🍱 Set</button>
+              {categories.map(c => <button key={c.id} onClick={() => { setEditOrderCat(c.id); setEditOrderShowCombos(false); }} style={{ padding: "4px 12px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: editOrderCat === c.id && !editOrderShowCombos ? "#3b82f6" : "#f8fafc", color: editOrderCat === c.id && !editOrderShowCombos ? "#fff" : "#64748b", borderColor: editOrderCat === c.id && !editOrderShowCombos ? "#3b82f6" : "#e2e8f0" }}>{c.name}</button>)}
+            </div>
+            <input value={editOrderSearch} onChange={e => setEditOrderSearch(e.target.value)} placeholder="🔍 Cari item..." style={{ ...S.inp, marginBottom: 8 }} />
+            <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 8, minHeight: 120 }}>
+              {(editOrderShowCombos ? combos : products.filter(p => (editOrderCat === "all" || p.categoryId === editOrderCat) && p.name.toLowerCase().includes(editOrderSearch.toLowerCase()))).map(p => (
+                <button key={p.id} onClick={() => editOrderAddItem(p, editOrderShowCombos)} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 10, padding: "10px 8px", cursor: "pointer", textAlign: "center" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = "#3b82f6"} onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
+                  <div style={{ fontSize: 24, marginBottom: 4 }}>{p.emoji}</div>
+                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{p.name}</div>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{formatRM(p.price)}</div>
+                </button>
+              ))}
+            </div>
+            <button onClick={commitEditOrder} style={{ marginTop: 12, width: "100%", padding: 11, background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✅ Selesai Edit</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── SALES REPORT PRINT MODAL ── */}
+      {salesPrintModal && (
+        <div style={S.modal} onClick={() => setSalesPrintModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#1e293b" }}>🖨️ Print Sales Report</div>
+              <button onClick={() => setSalesPrintModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "#1e293b", cursor: "pointer", marginBottom: 10, fontWeight: 600 }}>
+                <input type="checkbox" checked={salesPrintItems} onChange={e => setSalesPrintItems(e.target.checked)} style={{ width: 16, height: 16 }} />
+                Sertakan senarai item
+              </label>
+            </div>
+            {printers.length > 0 && (
+              <>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>PRINT KE PRINTER</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 14 }}>
+                  {printers.map(p => (
+                    <button key={p.id} onClick={async () => {
+                      setSalesPrintModal(false);
+                      const filterLabel = salesFilter === "yesterday" ? "Semalam" : salesFilter === "week" ? "7 Hari" : salesFilter === "month" ? "Bulan Ini" : salesFilter === "year" ? "Tahun Ini" : salesFilter === "pickdate" ? salesPickDate : salesFilter === "pickmonth" ? salesPickMonth : salesPickYear || "Semua";
+                      const ESC = 0x1B, GS = 0x1D;
+                      const enc = new TextEncoder();
+                      const bytes = [];
+                      const add = (t) => bytes.push(...enc.encode(t + "\n"));
+                      bytes.push(ESC, 0x40);
+                      bytes.push(ESC, 0x61, 0x01);
+                      bytes.push(ESC, 0x45, 0x01);
+                      add("WARUNG DIGITAL");
+                      add("SALES REPORT");
+                      bytes.push(ESC, 0x45, 0x00);
+                      add(`Tempoh: ${filterLabel}`);
+                      bytes.push(ESC, 0x61, 0x00);
+                      const W = getPrintWidth(p.printerWidth || "58");
+                      add("-".repeat(W));
+                      const padW = W - 8;
+                      add(`${"Jumlah Jualan".padEnd(padW)}${formatRM(totalSalesFilter)}`);
+                      add(`${"Bil. Order".padEnd(padW)}${salesByFilter.length}`);
+                      add(`${"Purata/Order".padEnd(padW)}${formatRM(salesByFilter.length ? totalSalesFilter / salesByFilter.length : 0)}`);
+                      add("-".repeat(W));
+                      add("JUALAN MENGIKUT HARI:");
+                      Object.entries(salesByDay).sort((a,b) => new Date(b[0]) - new Date(a[0])).forEach(([day, data]) => {
+                        const l = day, r = formatRM(data.total);
+                        add(l + " ".repeat(Math.max(1, W - l.length - r.length)) + r);
+                        add(`  ${data.count} order`);
+                      });
+                      if (salesPrintItems) {
+                        add("-".repeat(W));
+                        add("ITEM PALING LARIS:");
+                        const itemCount = {};
+                        salesByFilter.forEach(o => o.cart.forEach(i => {
+                          if (!itemCount[i.name]) itemCount[i.name] = { qty: 0, total: 0 };
+                          itemCount[i.name].qty += i.qty; itemCount[i.name].total += i.price * i.qty;
+                        }));
+                        Object.entries(itemCount).sort((a,b) => b[1].qty - a[1].qty).forEach(([name, d], idx) => {
+                          const l = `${idx+1}. ${name}`, r = `${d.qty}x ${formatRM(d.total)}`;
+                          const nameW = W - r.length - 2;
+                          add(l.substring(0, nameW) + " ".repeat(Math.max(1, W - Math.min(l.length, nameW) - r.length)) + r);
+                        });
+                      }
+                      add("-".repeat(W));
+                      add(`Dicetak: ${new Date().toLocaleString("ms-MY")}`);
+                      bytes.push(GS, 0x56, 0x41, 0x10);
+                      await doPrint(p, new Uint8Array(bytes));
+                    }} style={{ padding: "10px 14px", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, textAlign: "left" }}>
+                      <span style={{ fontSize: 20 }}>{p.type === "bluetooth" ? "📶" : "📡"}</span>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b" }}>{p.name}</div>
+                        <div style={{ fontSize: 11, color: "#64748b" }}>{p.location} · {p.role}</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginBottom: 10, textAlign: "center" }}>— atau —</div>
+              </>
+            )}
+            <button onClick={() => {
+              setSalesPrintModal(false);
+              const filterLabel = salesFilter === "yesterday" ? "Semalam" : salesFilter === "week" ? "7 Hari" : salesFilter === "month" ? "Bulan Ini" : salesFilter === "year" ? "Tahun Ini" : salesFilter === "pickdate" ? salesPickDate : salesFilter === "pickmonth" ? salesPickMonth : salesPickYear || "Semua";
+              const lines = ["=".repeat(40), "         WARUNG DIGITAL — SALES REPORT", `         Tempoh: ${filterLabel}`, "=".repeat(40),
+                `Jumlah Jualan : ${formatRM(totalSalesFilter)}`, `Bilangan Order: ${salesByFilter.length}`,
+                `Purata/Order  : ${formatRM(salesByFilter.length ? totalSalesFilter / salesByFilter.length : 0)}`, "-".repeat(40), "JUALAN MENGIKUT HARI:"];
+              Object.entries(salesByDay).sort((a,b) => new Date(b[0]) - new Date(a[0])).forEach(([day, data]) => {
+                lines.push(`  ${day.padEnd(20)} ${data.count}x  ${formatRM(data.total)}`);
+              });
+              if (salesPrintItems) {
+                lines.push("-".repeat(40), "ITEM PALING LARIS:");
+                const itemCount = {};
+                salesByFilter.forEach(o => o.cart.forEach(i => {
+                  if (!itemCount[i.name]) itemCount[i.name] = { qty: 0, total: 0 };
+                  itemCount[i.name].qty += i.qty; itemCount[i.name].total += i.price * i.qty;
+                }));
+                Object.entries(itemCount).sort((a,b) => b[1].qty - a[1].qty).forEach(([name, d], idx) => {
+                  lines.push(`  ${String(idx+1).padStart(2)}. ${name.padEnd(20)} ${String(d.qty)+"x"}  ${formatRM(d.total)}`);
+                });
+              }
+              lines.push("=".repeat(40), `Dicetak: ${new Date().toLocaleString("ms-MY")}`);
+              const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a"); a.href = url; a.download = `sales_report_${filterLabel.replace(/[/ :]/g,"_")}.txt`;
+              a.click(); URL.revokeObjectURL(url);
+              toast("📥 Sales report dimuat turun!", "#4ade80");
+            }} style={{ width: "100%", padding: 11, background: "#64748b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>📥 Download sebagai .txt</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── QR ORDER MODAL ── */}
+      {showQRModal && (
+        <div style={S.modal} onClick={() => setShowQRModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 17, fontWeight: 700 }}>📱 QR Order — Self Order per Meja</div>
+              <button onClick={() => setShowQRModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "8px 12px" }}>
+              💡 Customer scan QR → buka dalam WiFi kedai → isi nama + phone → order terus masuk dashboard
+            </div>
+
+            {/* Pending Orders Section */}
+            {pendingOrders.filter(o => o.status === "pending").length > 0 && (
+              <div style={{ marginBottom: 20 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "#ef4444", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+                  🔔 Order Menunggu ({pendingOrders.filter(o => o.status === "pending").length})
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 280, overflowY: "auto" }}>
+                  {pendingOrders.filter(o => o.status === "pending").map(o => (
+                    <div key={o.id} style={{ background: "#fff7ed", border: "2px solid #f59e0b", borderRadius: 12, padding: "12px 14px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: "#92400e" }}>👤 {o.customerName} · 📞 {o.customerPhone}</div>
+                          <div style={{ fontSize: 12, color: "#92400e" }}>📍 {o.tableNo} · {fmtTime(o.time)}</div>
+                        </div>
+                        <div style={{ fontWeight: 700, fontSize: 16, color: "#f59e0b" }}>{formatRM(o.total)}</div>
+                      </div>
+                      <div style={{ background: "#fff", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+                        {o.cart.map(i => <div key={i._key} style={{ fontSize: 12, color: "#64748b", marginBottom: 2 }}>{i.emoji} {i.name} ×{i.qty} — {formatRM(i.price * i.qty)}</div>)}
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={() => acceptPendingOrder(o)} style={{ flex: 1, padding: "8px 0", background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✅ Terima & Buat Order</button>
+                        <button onClick={() => rejectPendingOrder(o.id)} style={{ padding: "8px 14px", background: "#ef4444", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>✕ Tolak</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {pendingOrders.filter(o => o.status !== "pending").length > 0 && (
+                  <button onClick={clearDonePendingOrders} style={{ marginTop: 8, padding: "6px 12px", background: "#f1f5f9", border: "none", borderRadius: 6, color: "#64748b", fontSize: 11, cursor: "pointer" }}>🗑️ Clear order yang dah selesai</button>
+                )}
+              </div>
+            )}
+
+            {/* QR Codes per table */}
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>QR Code Mengikut Meja</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, maxHeight: 340, overflowY: "auto" }}>
+              {tables.map(t => {
+                const qrUrl = `${qrBaseUrl}?qrorder=1&table=${t.id}`;
+                const imgId = `qr-img-${t.id}`;
+
+                function saveQR() {
+                  const img = document.getElementById(imgId);
+                  if (!img) return;
+                  const canvas = document.createElement("canvas");
+                  const pad = 24;
+                  const qrSize = 200;
+                  const textH = 60;
+                  canvas.width = qrSize + pad * 2;
+                  canvas.height = qrSize + pad * 2 + textH;
+                  const ctx = canvas.getContext("2d");
+                  ctx.fillStyle = "#ffffff";
+                  ctx.fillRect(0, 0, canvas.width, canvas.height);
+                  // Border
+                  ctx.strokeStyle = "#f59e0b";
+                  ctx.lineWidth = 4;
+                  ctx.roundRect(4, 4, canvas.width - 8, canvas.height - 8, 12);
+                  ctx.stroke();
+                  // Table name
+                  ctx.fillStyle = "#1e293b";
+                  ctx.font = "bold 18px Segoe UI, sans-serif";
+                  ctx.textAlign = "center";
+                  ctx.fillText(t.name, canvas.width / 2, pad + 20);
+                  ctx.font = "12px Segoe UI, sans-serif";
+                  ctx.fillStyle = "#64748b";
+                  ctx.fillText("Scan untuk order", canvas.width / 2, pad + 38);
+                  // QR image
+                  try {
+                    ctx.drawImage(img, pad, pad + textH - 10, qrSize, qrSize);
+                  } catch {
+                    toast("⚠️ Sila tunggu QR load dulu", "#f59e0b");
+                    return;
+                  }
+                  const link = document.createElement("a");
+                  link.download = `QR-${t.name.replace(/\s/g, "_")}.png`;
+                  link.href = canvas.toDataURL("image/png");
+                  link.click();
+                  toast(`📥 QR ${t.name} disimpan!`, "#4ade80");
+                }
+
+                function printQR() {
+                  const img = document.getElementById(imgId);
+                  if (!img) return;
+                  const win = window.open("", "_blank");
+                  win.document.write(`
+                    <html><head><title>QR ${t.name}</title>
+                    <style>
+                      body { margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #fff; font-family: 'Segoe UI', sans-serif; }
+                      .card { border: 3px solid #f59e0b; border-radius: 16px; padding: 24px; text-align: center; width: 260px; }
+                      h2 { margin: 0 0 4px; font-size: 20px; color: #1e293b; }
+                      p { margin: 0 0 14px; font-size: 13px; color: #64748b; }
+                      img { width: 200px; height: 200px; border: 3px solid #f59e0b; border-radius: 8px; }
+                      small { display: block; margin-top: 10px; font-size: 10px; color: #94a3b8; word-break: break-all; }
+                    </style></head>
+                    <body><div class="card">
+                      <h2>${t.name}</h2>
+                      <p>Scan untuk order</p>
+                      <img src="${img.src}" />
+                      <small>${qrUrl}</small>
+                    </div></body></html>
+                  `);
+                  win.document.close();
+                  win.onload = () => { win.print(); };
+                }
+
+                return (
+                  <div key={t.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: 14, textAlign: "center" }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "#1e293b", marginBottom: 8 }}>📍 {t.name}</div>
+                    <div style={{ display: "flex", justifyContent: "center", marginBottom: 8 }}>
+                      <QRImg value={qrUrl} size={130} id={imgId} />
+                    </div>
+                    <div style={{ fontSize: 9, color: "#94a3b8", wordBreak: "break-all", marginBottom: 8 }}>{qrUrl}</div>
+                    <div style={{ display: "flex", gap: 5 }}>
+                      <button onClick={() => navigator.clipboard?.writeText(qrUrl).then(() => toast("📋 URL disalin!", "#4ade80"))} style={{ flex: 1, padding: "5px 0", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", fontSize: 10, cursor: "pointer", fontWeight: 600 }}>📋 Salin</button>
+                      <button onClick={saveQR} style={{ flex: 1, padding: "5px 0", background: "#f0fdf4", border: "none", borderRadius: 6, color: "#22c55e", fontSize: 10, cursor: "pointer", fontWeight: 600 }}>💾 Simpan</button>
+                      <button onClick={printQR} style={{ flex: 1, padding: "5px 0", background: "#fff7ed", border: "none", borderRadius: 6, color: "#f59e0b", fontSize: 10, cursor: "pointer", fontWeight: 600 }}>🖨️ Print</button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SPLIT BILL MODAL ── */}
+      {splitMode && splitOrderKey && activeOrders[splitOrderKey] && (
+        <div style={S.modal} onClick={() => setSplitMode(false)}>
+          <div style={{ ...S.mbox, maxWidth: 460 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>✂️ Split Bill — {activeOrders[splitOrderKey].tableNo}</div>
+              <button onClick={() => setSplitMode(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>Tap item yang nak dibayar sekarang. Boleh pilih sebahagian quantity.</div>
+
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 12, marginBottom: 14, maxHeight: 280, overflowY: "auto" }}>
+              {activeOrders[splitOrderKey].cart.map(i => {
+                const selectedQty = splitSelected[i._key] || 0;
+                return (
+                  <div key={i._key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, background: selectedQty > 0 ? "#f0fdf4" : "#fff", borderRadius: 8, padding: "8px 10px", border: `1px solid ${selectedQty > 0 ? "#22c55e" : "#e2e8f0"}` }}>
+                    <span style={{ fontSize: 20 }}>{i.emoji}</span>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600 }}>{i.name}</div>
+                      <div style={{ fontSize: 11, color: "#64748b" }}>{formatRM(i.price)} × {i.qty}</div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <button onClick={() => setSplitSelected(prev => { const cur = prev[i._key] || 0; if (cur <= 0) return prev; const n = { ...prev }; if (cur === 1) delete n[i._key]; else n[i._key] = cur - 1; return n; })} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>−</button>
+                      <span style={{ fontSize: 14, fontWeight: 700, minWidth: 24, textAlign: "center", color: selectedQty > 0 ? "#22c55e" : "#94a3b8" }}>{selectedQty}</span>
+                      <button onClick={() => toggleSplitItem(i._key, i.qty)} style={{ width: 26, height: 26, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>+</button>
+                    </div>
+                    <div style={{ fontSize: 13, fontWeight: 700, minWidth: 58, textAlign: "right", color: selectedQty > 0 ? "#22c55e" : "#94a3b8" }}>{formatRM(i.price * selectedQty)}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Split total */}
+            <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#166534" }}>
+                <span>Jumlah Bayar Sekarang</span><span>{formatRM(getSplitTotal())}</span>
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginTop: 4 }}>Balance yang tinggal akan kekal dalam order</div>
+            </div>
+
+            {/* Payment method */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Kaedah Bayaran</label>
+              <div style={{ display: "flex", gap: 8 }}>
+                {[["cash","💵 Tunai"],["card","💳 Kad"],["qr","📱 QR"]].map(([id,l]) => (
+                  <button key={id} onClick={() => setSplitPayMethod(id)} style={{ flex: 1, padding: 9, border: "2px solid", borderRadius: 8, cursor: "pointer", background: splitPayMethod === id ? "#3b82f6" : "#f8fafc", color: splitPayMethod === id ? "#fff" : "#64748b", borderColor: splitPayMethod === id ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 12 }}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {splitPayMethod === "cash" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={S.lbl}>Jumlah Tunai</label>
+                <input type="number" value={splitCashIn} onChange={e => setSplitCashIn(e.target.value)} placeholder="0.00" style={{ ...S.inp, fontSize: 16, fontWeight: 700, marginBottom: 6 }} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  {[10,20,50,100].map(a => <button key={a} onClick={() => setSplitCashIn(a.toString())} style={{ flex: 1, padding: "7px 0", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#000" }}>RM{a}</button>)}
+                </div>
+                {splitCashIn && parseFloat(splitCashIn) >= getSplitTotal() && getSplitTotal() > 0 && (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 8, padding: "7px 10px", marginTop: 8, display: "flex", justifyContent: "space-between", fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                    <span>Baki:</span><span>{formatRM(parseFloat(splitCashIn) - getSplitTotal())}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => doSplitCheckout(false)} disabled={getSplitTotal() === 0} style={{ flex: 1, padding: 11, background: getSplitTotal() === 0 ? "#e2e8f0" : "#64748b", border: "none", borderRadius: 8, color: getSplitTotal() === 0 ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 12, cursor: getSplitTotal() === 0 ? "not-allowed" : "pointer" }}>✅ Bayar (Tanpa Print)</button>
+              <button onClick={() => doSplitCheckout(true)} disabled={getSplitTotal() === 0 || (splitPayMethod === "cash" && (!splitCashIn || parseFloat(splitCashIn) < getSplitTotal()))} style={{ flex: 1, padding: 11, background: getSplitTotal() === 0 || (splitPayMethod === "cash" && (!splitCashIn || parseFloat(splitCashIn) < getSplitTotal())) ? "#e2e8f0" : "#22c55e", border: "none", borderRadius: 8, color: getSplitTotal() === 0 || (splitPayMethod === "cash" && (!splitCashIn || parseFloat(splitCashIn) < getSplitTotal())) ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>🖨️ Bayar + Print</button>
+            </div>
+            <button onClick={() => setSplitMode(false)} style={{ width: "100%", marginTop: 8, padding: 9, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", color: "#64748b", fontSize: 13 }}>← Batal</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// WIFI RAW TCP PRINT SUPPORT (ADDED - ORIGINAL CODE NOT REMOVED)
+// Untuk thermal printer macam Zywell / 9Printer / XPrinter
+// Printer & phone cuma perlu connect WiFi sama.
+// TAK perlu internet.
+// ─────────────────────────────────────────────────────────────
+
+// INSTALL (kalau belum ada):
+// npm install react-native-tcp-socket
+
+
+
+
+
+
+// CONTOH GUNA:
+//
+// await printWifiRaw(
+//   "192.168.0.200",
+//   slipData,
+//   9100
+// );
+//
+// slipData = ESC/POS bytes daripada buildOrderSlipBytes()
+//
+// Sesuai untuk:
+// - Zywell
+// - 9Printer
+// - XPrinter
+// - Epson TM series
+//
+// Lebih stabil dari Bluetooth untuk POS.
