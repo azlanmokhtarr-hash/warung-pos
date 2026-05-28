@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, orderBy } from "firebase/firestore";
 
@@ -353,9 +353,8 @@ export default function App() {
   const [showQRModal, setShowQRModal] = useState(false);
   const [qrSelectedTable, setQrSelectedTable] = useState(null);
   const [newPendingCount, setNewPendingCount] = useState(0);
-  const [pendingAlert, setPendingAlert] = useState(null); // { order } — besar tengah screen
-  const [alertCountdown, setAlertCountdown] = useState(30);
-  const alertTimerRef = useRef(null);
+  const [pendingAlert, setPendingAlert] = useState(null); // { order, countdown }
+  const [alertCountdown, setAlertCountdown] = useState(0);
 
   // Realtime listener dari Firestore
   useEffect(() => {
@@ -363,39 +362,35 @@ export default function App() {
     const unsub = onSnapshot(q, (snap) => {
       const orders = snap.docs.map(d => ({ ...d.data(), _docId: d.id }));
       setPendingOrders(orders);
-      const pendingList = orders.filter(o => o.status === "pending");
-      setNewPendingCount(pendingList.length);
-      // Tunjuk alert besar untuk order paling baru yang pending
-      if (pendingList.length > 0) {
-        const newest = pendingList[0];
+      const newOnes = orders.filter(o => o.status === "pending");
+      setNewPendingCount(newOnes.length);
+      // Show alert for latest pending order if not already alerting
+      if (newOnes.length > 0) {
         setPendingAlert(prev => {
-          // Jangan replace kalau alert yang sama dah tunjuk
-          if (prev && prev._docId === newest._docId) return prev;
-          return newest;
+          if (!prev || prev._docId !== newOnes[0]._docId) {
+            setAlertCountdown(30);
+            return newOnes[0];
+          }
+          return prev;
         });
+      } else {
+        setPendingAlert(null);
       }
     });
     return () => unsub();
   }, []);
 
-  // Countdown timer untuk pendingAlert
+  // Countdown timer for auto-accept
   useEffect(() => {
-    if (!pendingAlert) { setAlertCountdown(30); return; }
-    setAlertCountdown(30);
-    if (alertTimerRef.current) clearInterval(alertTimerRef.current);
-    alertTimerRef.current = setInterval(() => {
-      setAlertCountdown(c => {
-        if (c <= 1) {
-          clearInterval(alertTimerRef.current);
-          // Auto accept
-          acceptPendingOrder(pendingAlert).then(() => setPendingAlert(null));
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-    return () => clearInterval(alertTimerRef.current);
-  }, [pendingAlert?._docId]);
+    if (!pendingAlert) return;
+    if (alertCountdown <= 0) {
+      acceptPendingOrder(pendingAlert);
+      setPendingAlert(null);
+      return;
+    }
+    const t = setTimeout(() => setAlertCountdown(c => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [alertCountdown, pendingAlert]);
 
   // QR Base URL — Vercel deployment
   const qrBaseUrl = "https://warung-pos-nine.vercel.app";
@@ -1061,7 +1056,7 @@ export default function App() {
     };
     const timer = setTimeout(syncMenu, 2000); // debounce 2s
     return () => clearTimeout(timer);
-  }, [products, combos, categories, taxRate]);
+  }, [products, combos, categories, taxRate, taxConfig]);
   // ════════════════════════════════════════════════════════════════════════
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const isQROrderPage = urlParams.get("qrorder") === "1";
@@ -1075,10 +1070,9 @@ export default function App() {
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
   const [qrSearch, setQrSearch] = useState("");
-  const [qrShowCart, setQrShowCart] = useState(false);
-  const [qrVariantItem, setQrVariantItem] = useState(null);
-  const [qrSelectedVariant, setQrSelectedVariant] = useState(null);
-  const [qrPhoneError, setQrPhoneError] = useState("");
+  const [qrCheckoutOpen, setQrCheckoutOpen] = useState(false); // checkout modal
+  const [qrVariantItem, setQrVariantItem] = useState(null); // variant picker
+  const [qrVariantSelected, setQrVariantSelected] = useState({});
   const [qrMenuLoaded, setQrMenuLoaded] = useState(!isQROrderPage);
 
   // Load menu dari Firestore untuk QR page
@@ -1091,7 +1085,10 @@ export default function App() {
           if (data.products) setProducts(data.products);
           if (data.combos) setCombos(data.combos);
           if (data.categories) setCategories(data.categories);
-          if (data.taxConfig) setTaxConfig(data.taxConfig);
+          if (typeof data.taxRate === "number") {
+            // Convert taxRate back to taxConfig format
+            setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
+          }
         }
         setQrMenuLoaded(true);
       }).catch(() => setQrMenuLoaded(true));
@@ -1110,46 +1107,36 @@ export default function App() {
       p.name.toLowerCase().includes(qrSearch.toLowerCase())
     );
     const qrSub = qrCart.reduce((s, i) => s + i.price * i.qty, 0);
-    const qrTax = qrSub * taxRate;
-    const qrTotal = qrSub + qrTax;
+    const qrTax = Math.round(qrSub * taxRate * 100) / 100;
+    const qrTotal = Math.round((qrSub + qrTax) * 100) / 100;
 
-    const validatePhone = (p) => /^01[0-9]{8,9}$/.test(p.replace(/[-\s]/g, ""));
+    // Malaysia phone: 01x-xxxxxxx, 8-11 digits after removing +60/0
+    const validatePhone = (p) => {
+      const cleaned = p.replace(/[\s\-]/g, "");
+      return /^(01[0-9]{7,9}|601[0-9]{7,9})$/.test(cleaned);
+    };
 
-    function qrAddItem(p, isCombo = false, variantOpt = null) {
-      // Kalau ada variants dan belum pilih, tunjuk variant modal
-      if (!isCombo && p.variants && p.variants.length > 0 && !variantOpt) {
-        setQrVariantItem(p);
-        setQrSelectedVariant(null);
-        return;
-      }
-      const variantSuffix = variantOpt ? `_${variantOpt.name}` : "";
-      const key = isCombo ? `combo_${p.id}` : `item_${p.id}${variantSuffix}`;
-      const finalPrice = variantOpt ? (p.price + (variantOpt.extraPrice || 0)) : p.price;
-      const finalName = variantOpt ? `${p.name} (${variantOpt.name})` : p.name;
+    function qrAddItem(p, isCombo = false) {
+      const key = isCombo ? `combo_${p.id}` : `item_${p.id}_`;
       setQrCart(prev => {
         const e = prev.find(i => i._key === key);
         if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
         if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: [...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || [])] }];
-        return [...prev, { _key: key, id: p.id, name: finalName, emoji: p.emoji, price: finalPrice, qty: 1, isCombo: false, printerId: p.printerId || "" }];
+        return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, variantLabel: "", printerId: p.printerId || "" }];
       });
     }
     function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
 
     async function qrSubmitOrder() {
-      if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
       if (!qrName.trim()) return alert("Sila masukkan nama anda");
-      const cleanPhone = qrPhone.replace(/[-\s]/g, "");
-      if (!validatePhone(cleanPhone)) {
-        setQrPhoneError("No. telefon tidak sah. Mesti bermula dengan 01 (cth: 0123456789)");
-        return;
-      }
-      setQrPhoneError("");
+      if (!validatePhone(qrPhone)) return alert("No. telefon tidak sah. Mesti bermula dengan 01 (contoh: 0123456789)");
+      if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
 
       const pending = {
         tableId: qrTableId,
         tableNo: qrTableName,
         customerName: qrName.trim(),
-        customerPhone: cleanPhone,
+        customerPhone: qrPhone.trim(),
         cart: qrCart,
         subtotal: qrSub,
         tax: qrTax,
@@ -1161,7 +1148,6 @@ export default function App() {
       try {
         await addDoc(collection(db, "pendingOrders"), pending);
         setQrSubmitted(true);
-        setQrShowCart(false);
       } catch (e) {
         alert("Gagal hantar order. Pastikan ada internet.");
       }
@@ -1173,19 +1159,18 @@ export default function App() {
           <div style={{ fontSize: 60, marginBottom: 16 }}>✅</div>
           <div style={{ fontSize: 22, fontWeight: 700, color: "#166534", marginBottom: 8 }}>Order Diterima!</div>
           <div style={{ fontSize: 14, color: "#64748b", marginBottom: 20 }}>Order untuk <b>{qrTableName}</b> sedang diproses. Staff kami akan membantu anda.</div>
-          <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 12, padding: 14, marginBottom: 16, textAlign: "left" }}>
-            {qrCart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}><span>{i.emoji} {i.name} ×{i.qty}</span><span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span></div>)}
-            <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15 }}><span>JUMLAH</span><span>{formatRM(qrTotal)}</span></div>
-          </div>
-          {/* Screenshot reminder */}
-          <div style={{ background: "#fefce8", border: "2px dashed #f59e0b", borderRadius: 12, padding: "12px 14px", marginBottom: 16, display: "flex", alignItems: "flex-start", gap: 10, textAlign: "left" }}>
-            <div style={{ fontSize: 24, flexShrink: 0 }}>📸</div>
-            <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#92400e", marginBottom: 3 }}>Sila screenshot halaman ini!</div>
-              <div style={{ fontSize: 12, color: "#92400e" }}>Simpan sebagai rujukan order anda. Bayaran dibuat di kaunter.</div>
+          <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 12, padding: 14, marginBottom: 12, textAlign: "left" }}>
+            {qrCart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}><span>{i.emoji} {i.name}{i.variantLabel ? ` (${i.variantLabel})` : ""} ×{i.qty}</span><span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span></div>)}
+            <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3, color: "#64748b" }}><span>Subtotal</span><span>{formatRM(qrSub)}</span></div>
+              {qrTax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3, color: "#64748b" }}><span>Tax ({(taxRate * 100).toFixed(0)}%)</span><span>{formatRM(qrTax)}</span></div>}
+              <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15, marginTop: 4 }}><span>JUMLAH</span><span>{formatRM(qrTotal)}</span></div>
             </div>
           </div>
-          <div style={{ fontSize: 13, color: "#94a3b8" }}>Terima kasih, {qrName}! 🙏</div>
+          <div style={{ background: "#fef9c3", border: "1px solid #fde047", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#713f12" }}>
+            📸 <b>Sila screenshot halaman ini</b> sebagai rujukan order anda.
+          </div>
+          <div style={{ fontSize: 13, color: "#94a3b8" }}>Bayaran di kaunter. Terima kasih, {qrName}! 🙏</div>
         </div>
       </div>
     );
@@ -1203,6 +1188,69 @@ export default function App() {
           </div>
         </div>
 
+        {/* Variant Picker Modal */}
+        {qrVariantItem && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+            <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{qrVariantItem.emoji} {qrVariantItem.name}</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Pilih varian:</div>
+              {qrVariantItem.variants?.map(v => (
+                <button key={v.name} onClick={() => setQrVariantSelected(s => ({ ...s, [qrVariantItem.id]: v }))}
+                  style={{ width: "100%", padding: "12px 16px", marginBottom: 8, border: `2px solid ${qrVariantSelected[qrVariantItem.id]?.name === v.name ? "#3b82f6" : "#e2e8f0"}`, borderRadius: 10, background: qrVariantSelected[qrVariantItem.id]?.name === v.name ? "#eff6ff" : "#fff", display: "flex", justifyContent: "space-between", cursor: "pointer" }}>
+                  <span style={{ fontWeight: 600 }}>{v.name}</span>
+                  <span style={{ color: "#3b82f6", fontWeight: 700 }}>{v.price > 0 ? `+${formatRM(v.price)}` : formatRM(qrVariantItem.price)}</span>
+                </button>
+              ))}
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <button onClick={() => setQrVariantItem(null)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>Batal</button>
+                <button onClick={() => {
+                  const sel = qrVariantSelected[qrVariantItem.id];
+                  if (!sel && qrVariantItem.variants?.length > 0) return alert("Sila pilih varian");
+                  const price = sel ? (sel.price > 0 ? qrVariantItem.price + sel.price : qrVariantItem.price) : qrVariantItem.price;
+                  const key = `item_${qrVariantItem.id}_${sel?.name || ""}`;
+                  setQrCart(prev => {
+                    const e = prev.find(i => i._key === key);
+                    if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
+                    return [...prev, { _key: key, id: qrVariantItem.id, name: qrVariantItem.name, emoji: qrVariantItem.emoji, price, qty: 1, isCombo: false, variantLabel: sel?.name || "", printerId: qrVariantItem.printerId || "" }];
+                  });
+                  setQrVariantItem(null);
+                }} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ Tambah ke Cart</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Checkout Modal */}
+        {qrCheckoutOpen && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+            <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ fontWeight: 700, fontSize: 17, marginBottom: 16 }}>📋 Semak & Hantar Order</div>
+              {/* Order summary */}
+              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 14, marginBottom: 16 }}>
+                {qrCart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}><span>{i.emoji} {i.name}{i.variantLabel ? ` (${i.variantLabel})` : ""} ×{i.qty}</span><span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span></div>)}
+                <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#64748b", marginBottom: 2 }}><span>Subtotal</span><span>{formatRM(qrSub)}</span></div>
+                  {qrTax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, color: "#64748b", marginBottom: 2 }}><span>Tax ({(taxRate * 100).toFixed(0)}%)</span><span>{formatRM(qrTax)}</span></div>}
+                  <div style={{ display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15 }}><span>JUMLAH</span><span style={{ color: "#f59e0b" }}>{formatRM(qrTotal)}</span></div>
+                </div>
+              </div>
+              {/* Name & Phone */}
+              <div style={{ marginBottom: 12 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 5 }}>Nama *</label>
+                <input value={qrName} onChange={e => setQrName(e.target.value)} placeholder="Nama anda" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 5 }}>No. Telefon * <span style={{ fontWeight: 400, color: "#94a3b8" }}>(contoh: 0123456789)</span></label>
+                <input value={qrPhone} onChange={e => setQrPhone(e.target.value)} placeholder="01xxxxxxxx" type="tel" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => setQrCheckoutOpen(false)} style={{ flex: 1, padding: 14, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>← Balik</button>
+                <button onClick={qrSubmitOrder} style={{ flex: 2, padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>📨 Hantar Order</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Category tabs */}
         <div style={{ background: "#fff", borderBottom: "1px solid #e2e8f0", overflowX: "auto", whiteSpace: "nowrap", padding: "10px 12px", display: "flex", gap: 8 }}>
           <button onClick={() => { setQrCatFilter("all"); setQrShowCombos(false); }} style={{ padding: "6px 14px", borderRadius: 20, border: "1px solid", fontSize: 12, fontWeight: 600, cursor: "pointer", background: qrCatFilter === "all" && !qrShowCombos ? "#1e293b" : "transparent", color: qrCatFilter === "all" && !qrShowCombos ? "#fff" : "#64748b", borderColor: qrCatFilter === "all" && !qrShowCombos ? "#1e293b" : "#e2e8f0", flexShrink: 0 }}>📋 Semua</button>
@@ -1219,13 +1267,20 @@ export default function App() {
         <div style={{ padding: 14, display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 10, paddingBottom: qrCart.length > 0 ? 180 : 20 }}>
           {(qrShowCombos ? combos.filter(c => !c.soldOut) : qrFiltered).map(p => {
             const isCombo = qrShowCombos;
-            const cartItem = qrCart.find(i => i._key === (isCombo ? `combo_${p.id}` : `item_${p.id}`));
+            const hasVariants = !isCombo && p.variants?.length > 0;
+            // For items with variants, show count across all variants
+            const cartQty = qrCart.filter(i => i.id === p.id && !i.isCombo).reduce((s, i) => s + i.qty, 0);
+            const cartItem = !hasVariants ? qrCart.find(i => i._key === (isCombo ? `combo_${p.id}` : `item_${p.id}_`)) : null;
             return (
               <div key={p.id} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 14, padding: "12px 10px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.05)" }}>
                 <div style={{ fontSize: 32, marginBottom: 6 }}>{p.emoji}</div>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>{p.name}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isCombo ? "#f59e0b" : "#3b82f6", marginBottom: 10 }}>{formatRM(p.price)}</div>
-                {cartItem ? (
+                {hasVariants ? (
+                  <button onClick={() => { setQrVariantItem(p); setQrVariantSelected({}); }} style={{ width: "100%", padding: "7px 0", background: cartQty > 0 ? "#eff6ff" : "#3b82f6", border: cartQty > 0 ? "2px solid #3b82f6" : "none", borderRadius: 8, color: cartQty > 0 ? "#3b82f6" : "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    {cartQty > 0 ? `${cartQty} dipilih ✓` : "+ Pilih Varian"}
+                  </button>
+                ) : cartItem ? (
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
                     <button onClick={() => qrUpdQty(cartItem._key, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
                     <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{cartItem.qty}</span>
@@ -1239,91 +1294,16 @@ export default function App() {
           })}
         </div>
 
-        {/* Floating cart bar — buka cart review dulu */}
+        {/* Floating cart bar */}
         {qrCart.length > 0 && (
           <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#1e293b", padding: "14px 20px", boxShadow: "0 -4px 20px rgba(0,0,0,.2)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ color: "#94a3b8", fontSize: 13 }}>{qrCart.reduce((s, i) => s + i.qty, 0)} item</div>
               <div style={{ color: "#f59e0b", fontWeight: 700, fontSize: 18 }}>{formatRM(qrTotal)}</div>
             </div>
-            <button onClick={() => setQrShowCart(true)} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
-              🛒 Semak Order ({qrCart.reduce((s,i)=>s+i.qty,0)} item) →
+            <button onClick={() => setQrCheckoutOpen(true)} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
+              🛒 Semak Order & Hantar ({qrTableName})
             </button>
-          </div>
-        )}
-
-        {/* Cart Review + Nama/Phone Modal */}
-        {qrShowCart && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1000, display: "flex", alignItems: "flex-end" }}>
-            <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", width: "100%", maxHeight: "90vh", overflowY: "auto", padding: "20px 20px 32px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                <div style={{ fontSize: 17, fontWeight: 700, color: "#1e293b" }}>🛒 Semak Order Anda</div>
-                <button onClick={() => setQrShowCart(false)} style={{ background: "#f1f5f9", border: "none", borderRadius: 8, width: 32, height: 32, fontSize: 16, cursor: "pointer", color: "#64748b" }}>✕</button>
-              </div>
-              {/* Cart items */}
-              <div style={{ background: "#f8fafc", borderRadius: 12, padding: 14, marginBottom: 16 }}>
-                {qrCart.map(i => (
-                  <div key={i._key} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, background: "#fff", borderRadius: 10, padding: "10px 12px", border: "1px solid #e2e8f0" }}>
-                    <span style={{ fontSize: 22 }}>{i.emoji}</span>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>{i.name}</div>
-                      <div style={{ fontSize: 12, color: "#3b82f6" }}>{formatRM(i.price)}</div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <button onClick={() => qrUpdQty(i._key, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
-                      <span style={{ fontSize: 14, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{i.qty}</span>
-                      <button onClick={() => qrUpdQty(i._key, 1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>+</button>
-                    </div>
-                    <div style={{ fontSize: 13, fontWeight: 700, minWidth: 58, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
-                  </div>
-                ))}
-                <div style={{ borderTop: "1px dashed #e2e8f0", paddingTop: 10, marginTop: 4 }}>
-                  {qrTax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 4 }}><span>Subtotal</span><span>{formatRM(qrSub)}</span></div>}
-                  {qrTax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(qrTax)}</span></div>}
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 17, fontWeight: 700, color: "#1e293b" }}><span>JUMLAH</span><span>{formatRM(qrTotal)}</span></div>
-                </div>
-              </div>
-              {/* Nama & Phone */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#475569", display: "block", marginBottom: 5 }}>Nama *</label>
-                <input value={qrName} onChange={e => setQrName(e.target.value)} placeholder="Nama anda" style={{ width: "100%", border: "1px solid #cbd5e1", borderRadius: 8, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-              </div>
-              <div style={{ marginBottom: 6 }}>
-                <label style={{ fontSize: 13, fontWeight: 700, color: "#475569", display: "block", marginBottom: 5 }}>No. Telefon * <span style={{ fontWeight: 400, fontSize: 11, color: "#94a3b8" }}>(cth: 0123456789)</span></label>
-                <input value={qrPhone} onChange={e => { setQrPhone(e.target.value); setQrPhoneError(""); }} placeholder="01xxxxxxxx" type="tel" style={{ width: "100%", border: `1px solid ${qrPhoneError ? "#ef4444" : "#cbd5e1"}`, borderRadius: 8, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
-                {qrPhoneError && <div style={{ color: "#ef4444", fontSize: 12, marginTop: 4 }}>⚠️ {qrPhoneError}</div>}
-              </div>
-              <button onClick={qrSubmitOrder} style={{ width: "100%", marginTop: 16, padding: 15, background: "#22c55e", border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 16, cursor: "pointer" }}>
-                📨 Hantar Order — {formatRM(qrTotal)}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Variant Modal untuk QR page */}
-        {qrVariantItem && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 1100, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-            <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 360 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>{qrVariantItem.emoji} {qrVariantItem.name}</div>
-              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Pilih pilihan:</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                {qrVariantItem.variants.map(v => (
-                  <button key={v.name} onClick={() => setQrSelectedVariant(v)}
-                    style={{ padding: "12px 16px", border: `2px solid ${qrSelectedVariant?.name === v.name ? "#3b82f6" : "#e2e8f0"}`, borderRadius: 10, background: qrSelectedVariant?.name === v.name ? "#eff6ff" : "#fff", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontWeight: 600, fontSize: 14 }}>{v.name}</span>
-                    <span style={{ fontSize: 13, color: "#3b82f6", fontWeight: 700 }}>{v.extraPrice > 0 ? `+${formatRM(v.extraPrice)}` : formatRM(qrVariantItem.price)}</span>
-                  </button>
-                ))}
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { setQrVariantItem(null); setQrSelectedVariant(null); }} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", fontWeight: 600, cursor: "pointer" }}>Batal</button>
-                <button onClick={() => { if (!qrSelectedVariant) return; qrAddItem(qrVariantItem, false, qrSelectedVariant); setQrVariantItem(null); setQrSelectedVariant(null); }}
-                  disabled={!qrSelectedVariant}
-                  style={{ flex: 2, padding: 12, background: qrSelectedVariant ? "#3b82f6" : "#e2e8f0", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: qrSelectedVariant ? "pointer" : "not-allowed", fontSize: 14 }}>
-                  ✅ Pilih
-                </button>
-              </div>
-            </div>
           </div>
         )}
       </div>
@@ -1373,44 +1353,6 @@ export default function App() {
 
       {/* Notification */}
       {notif && <div style={{ position: "fixed", top: 16, right: 16, background: "#1e293b", border: `1px solid ${notifClr}`, borderRadius: 10, padding: "10px 16px", fontSize: 13, zIndex: 9999, color: notifClr, boxShadow: "0 4px 12px rgba(0,0,0,.3)" }}>{notif}</div>}
-
-      {/* ── BIG PENDING ORDER ALERT ── */}
-      {pendingAlert && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", zIndex: 9997, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-          <div style={{ background: "#fff", borderRadius: 20, padding: "28px 24px", width: "100%", maxWidth: 420, boxShadow: "0 12px 48px rgba(0,0,0,.4)", animation: "pulse 1.5s infinite" }}>
-            <div style={{ textAlign: "center", marginBottom: 16 }}>
-              <div style={{ fontSize: 52, marginBottom: 8 }}>🔔</div>
-              <div style={{ fontSize: 22, fontWeight: 800, color: "#ef4444", marginBottom: 4 }}>ORDER BARU MASUK!</div>
-              <div style={{ fontSize: 13, color: "#64748b" }}>QR Order dari pelanggan</div>
-            </div>
-            <div style={{ background: "#fff7ed", border: "2px solid #f59e0b", borderRadius: 12, padding: "12px 14px", marginBottom: 16 }}>
-              <div style={{ fontWeight: 700, fontSize: 15, color: "#92400e", marginBottom: 4 }}>👤 {pendingAlert.customerName} · 📞 {pendingAlert.customerPhone}</div>
-              <div style={{ fontSize: 12, color: "#92400e", marginBottom: 8 }}>📍 {pendingAlert.tableNo}</div>
-              {pendingAlert.cart?.map(i => <div key={i._key} style={{ fontSize: 13, color: "#64748b", marginBottom: 2 }}>{i.emoji} {i.name} ×{i.qty}</div>)}
-              <div style={{ borderTop: "1px dashed #f59e0b", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 16, color: "#f59e0b" }}><span>JUMLAH</span><span>{formatRM(pendingAlert.total)}</span></div>
-            </div>
-            {/* Countdown bar */}
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 4 }}>
-                <span>Auto-terima dalam</span><span style={{ fontWeight: 700, color: alertCountdown <= 10 ? "#ef4444" : "#64748b" }}>{alertCountdown}s</span>
-              </div>
-              <div style={{ height: 8, background: "#e2e8f0", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ height: "100%", background: alertCountdown <= 10 ? "#ef4444" : "#f59e0b", borderRadius: 4, width: `${(alertCountdown / 30) * 100}%`, transition: "width 1s linear" }} />
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={async () => { clearInterval(alertTimerRef.current); await rejectPendingOrder(pendingAlert); setPendingAlert(null); }}
-                style={{ flex: 1, padding: "12px 0", background: "#fef2f2", border: "2px solid #ef4444", borderRadius: 10, color: "#ef4444", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✕ Tolak</button>
-              <button onClick={async () => { clearInterval(alertTimerRef.current); await acceptPendingOrder(pendingAlert); setPendingAlert(null); }}
-                style={{ flex: 2, padding: "12px 0", background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✅ Terima Order</button>
-            </div>
-            <button onClick={() => { clearInterval(alertTimerRef.current); setPendingAlert(null); setShowQRModal(true); }}
-              style={{ width: "100%", marginTop: 8, padding: "9px 0", background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", fontSize: 12, cursor: "pointer" }}>
-              🔍 Lihat semua pending order
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Sending Order Overlay */}
       {sendingOrder && (
@@ -2793,6 +2735,37 @@ export default function App() {
               a.click(); URL.revokeObjectURL(url);
               toast("📥 Sales report dimuat turun!", "#4ade80");
             }} style={{ width: "100%", padding: 11, background: "#64748b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>📥 Download sebagai .txt</button>
+          </div>
+        </div>
+      )}
+
+      {/* ── BIG QR ORDER ALERT ── */}
+      {pendingAlert && !isQROrderPage && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ background: "#fff", borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,.3)" }}>
+            <div style={{ textAlign: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 48, marginBottom: 8 }}>🔔</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: "#1e293b" }}>Order Baru Masuk!</div>
+              <div style={{ fontSize: 14, color: "#64748b", marginTop: 4 }}>dari <b>{pendingAlert.customerName}</b> · 📞 {pendingAlert.customerPhone}</div>
+              <div style={{ fontSize: 13, color: "#f59e0b", fontWeight: 700, marginTop: 2 }}>📍 {pendingAlert.tableNo}</div>
+            </div>
+            <div style={{ background: "#f8fafc", borderRadius: 12, padding: 12, marginBottom: 16 }}>
+              {pendingAlert.cart?.map((i, idx) => <div key={idx} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}><span>{i.emoji} {i.name}{i.variantLabel ? ` (${i.variantLabel})` : ""} ×{i.qty}</span><span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span></div>)}
+              <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between", fontWeight: 700, fontSize: 15 }}><span>JUMLAH</span><span style={{ color: "#f59e0b" }}>{formatRM(pendingAlert.total)}</span></div>
+            </div>
+            {/* Countdown bar */}
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 4 }}>
+                <span>Auto terima dalam</span><span style={{ fontWeight: 700, color: alertCountdown <= 10 ? "#ef4444" : "#22c55e" }}>{alertCountdown}s</span>
+              </div>
+              <div style={{ background: "#e2e8f0", borderRadius: 99, height: 8 }}>
+                <div style={{ background: alertCountdown <= 10 ? "#ef4444" : "#22c55e", borderRadius: 99, height: 8, width: `${(alertCountdown / 30) * 100}%`, transition: "width 1s linear" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => { rejectPendingOrder(pendingAlert); setPendingAlert(null); }} style={{ flex: 1, padding: 14, background: "#fef2f2", border: "2px solid #ef4444", borderRadius: 12, color: "#ef4444", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✕ Tolak</button>
+              <button onClick={() => { acceptPendingOrder(pendingAlert); setPendingAlert(null); }} style={{ flex: 2, padding: 14, background: "#22c55e", border: "none", borderRadius: 12, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✅ Terima ({alertCountdown}s)</button>
+            </div>
           </div>
         </div>
       )}
