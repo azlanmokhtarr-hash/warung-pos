@@ -1045,18 +1045,18 @@ export default function App() {
     if (isQROrderPage) return; // QR page tak perlu push
     const syncMenu = async () => {
       try {
-        await updateDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig });
+        await updateDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
       } catch {
         // Doc mungkin belum wujud, cuba addDoc
         try {
           const { setDoc } = await import("firebase/firestore");
-          await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig });
+          await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
         } catch {}
       }
     };
     const timer = setTimeout(syncMenu, 2000); // debounce 2s
     return () => clearTimeout(timer);
-  }, [products, combos, categories, taxRate, taxConfig]);
+  }, [products, combos, categories, taxRate, taxConfig, tables]);
   // ════════════════════════════════════════════════════════════════════════
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const isQROrderPage = urlParams.get("qrorder") === "1";
@@ -1085,6 +1085,7 @@ export default function App() {
           if (data.products) setProducts(data.products);
           if (data.combos) setCombos(data.combos);
           if (data.categories) setCategories(data.categories);
+          if (data.tables) setTables(data.tables);
           if (typeof data.taxRate === "number") {
             // Convert taxRate back to taxConfig format
             setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
@@ -1190,8 +1191,8 @@ export default function App() {
 
         {/* Variant Picker Modal */}
         {qrVariantItem && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", zIndex: 200, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-            <div style={{ background: "#fff", borderRadius: "20px 20px 0 0", padding: 24, width: "100%", maxWidth: 480 }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 20, padding: 24, width: "100%", maxWidth: 400 }}>
               <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>{qrVariantItem.emoji} {qrVariantItem.name}</div>
               <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Pilih varian:</div>
               {qrVariantItem.variants?.map(v => (
@@ -1202,10 +1203,10 @@ export default function App() {
                 </button>
               ))}
               <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-                <button onClick={() => setQrVariantItem(null)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>Batal</button>
+                <button onClick={() => { setQrVariantItem(null); setQrVariantSelected({}); }} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>Batal</button>
                 <button onClick={() => {
                   const sel = qrVariantSelected[qrVariantItem.id];
-                  if (!sel && qrVariantItem.variants?.length > 0) return alert("Sila pilih varian");
+                  if (!sel && qrVariantItem.variants?.length > 0) { alert("Sila pilih varian"); return; }
                   const price = sel ? (sel.price > 0 ? qrVariantItem.price + sel.price : qrVariantItem.price) : qrVariantItem.price;
                   const key = `item_${qrVariantItem.id}_${sel?.name || ""}`;
                   setQrCart(prev => {
@@ -1214,6 +1215,7 @@ export default function App() {
                     return [...prev, { _key: key, id: qrVariantItem.id, name: qrVariantItem.name, emoji: qrVariantItem.emoji, price, qty: 1, isCombo: false, variantLabel: sel?.name || "", printerId: qrVariantItem.printerId || "" }];
                   });
                   setQrVariantItem(null);
+                  setQrVariantSelected({});
                 }} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ Tambah ke Cart</button>
               </div>
             </div>
