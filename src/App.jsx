@@ -1061,7 +1061,8 @@ export default function App() {
   const urlParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
   const isQROrderPage = urlParams.get("qrorder") === "1";
   const qrTableId = urlParams.get("table") || "";
-  const qrTableName = tables.find(t => t.id === qrTableId)?.name || `Meja ${qrTableId}`;
+  const qrTableNameFromUrl = urlParams.get("tname") || "";
+  const qrTableName = qrTableNameFromUrl || tables.find(t => t.id === qrTableId)?.name || `Meja ${qrTableId}`;
 
   const [qrCart, setQrCart] = useState([]);
   const [qrName, setQrName] = useState("");
@@ -2820,7 +2821,7 @@ export default function App() {
             <div style={{ fontSize: 14, fontWeight: 700, color: "#1e293b", marginBottom: 12 }}>QR Code Mengikut Meja</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 12, maxHeight: 340, overflowY: "auto" }}>
               {tables.map(t => {
-                const qrUrl = `${qrBaseUrl}?qrorder=1&table=${t.id}`;
+                const qrUrl = `${qrBaseUrl}?qrorder=1&table=${t.id}&tname=${encodeURIComponent(t.name)}`;
                 const imgId = `qr-img-${t.id}`;
 
                 function saveQR() {
