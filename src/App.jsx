@@ -83,15 +83,66 @@ function useLocalStorage(key, def) {
 // printerWidth: "58" = 32 chars, "80" = 48 chars
 function getPrintWidth(printerWidth) { return printerWidth === "80" ? 48 : 32; }
 
-function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58") {
-  const { shopName = "WARUNG DIGITAL", phone = "03-1234 5678", address = "", footer = "Terima Kasih! Sila Datang Lagi" } = receiptConfig;
+// ─── Logo image → ESC/POS raster bitmap ──────────────────────────────────────
+function loadImageEl(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Convert a base64 image into ESC/POS GS v 0 raster bitmap bytes (monochrome, dithered by threshold)
+async function imageToEscPosRaster(base64, maxWidthDots = 240) {
+  try {
+    const img = await loadImageEl(base64);
+    const scale = Math.min(1, maxWidthDots / img.width);
+    let w = Math.max(8, Math.round(img.width * scale));
+    let h = Math.max(1, Math.round(img.height * scale));
+    w = w - (w % 8) || 8; // width must be a multiple of 8 dots
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h).data;
+    const widthBytes = w / 8;
+    const data = new Uint8Array(widthBytes * h);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = (y * w + x) * 4;
+        const r = imgData[idx], g = imgData[idx + 1], b = imgData[idx + 2], a = imgData[idx + 3];
+        const lum = a < 128 ? 255 : (0.299 * r + 0.587 * g + 0.114 * b);
+        if (lum < 160) data[y * widthBytes + (x >> 3)] |= (0x80 >> (x % 8));
+      }
+    }
+    const GS = 0x1D;
+    const header = [GS, 0x76, 0x30, 0x00, widthBytes & 0xFF, (widthBytes >> 8) & 0xFF, h & 0xFF, (h >> 8) & 0xFF];
+    const out = new Uint8Array(header.length + data.length);
+    out.set(header, 0);
+    out.set(data, header.length);
+    return out;
+  } catch (e) { return null; }
+}
+
+// openDrawer: kicks the cash drawer (ESC p 0 25 250) — only meaningful for printers wired to a drawer
+async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58", openDrawer = false) {
+  const { shopName = "WARUNG DIGITAL", phone = "03-1234 5678", address = "", footer = "Terima Kasih! Sila Datang Lagi", logoBase64 = "" } = receiptConfig;
   const ESC = 0x1B, GS = 0x1D;
   const W = getPrintWidth(printerWidth);
   const enc = new TextEncoder();
   const bytes = [];
   const add = (t) => bytes.push(...enc.encode(t + "\n"));
   bytes.push(ESC, 0x40);
+  if (openDrawer) bytes.push(ESC, 0x70, 0x00, 0x19, 0xFA);
   bytes.push(ESC, 0x61, 0x01);
+  if (logoBase64) {
+    const maxDots = printerWidth === "80" ? 360 : 240;
+    const logoRaster = await imageToEscPosRaster(logoBase64, maxDots);
+    if (logoRaster) { bytes.push(...logoRaster); add(""); }
+  }
   add(shopName);
   if (phone) add(phone);
   if (address) add(address);
@@ -280,7 +331,7 @@ export default function App() {
   // Settings modals
   const [itemModal, setItemModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [] });
+  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [], imageBase64: "" });
   const [variantModal, setVariantModal] = useState(false);
   const [variantItem, setVariantItem] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -332,6 +383,8 @@ export default function App() {
   // Merge order
   const [mergeMode, setMergeMode] = useState(false);
   const [mergeSourceKey, setMergeSourceKey] = useState(null); // key in activeOrders
+  const [moveTableModal, setMoveTableModal] = useState(false);
+  const [moveSourceKey, setMoveSourceKey] = useState(null); // key in activeOrders being moved
 
   // Edit order modal — draft state (not saved until "Selesai Edit")
   const [editOrderKey, setEditOrderKey] = useState(null); // key in activeOrders
@@ -486,10 +539,16 @@ export default function App() {
   // Print receipt (cashier only)
   async function printReceipt(order) {
     const cashierPrinters = printers.filter(p => p.role === "cashier" || !p.role);
+    const isCash = order.method === "cash";
     if (cashierPrinters.length === 0 && printers.length > 0) {
-      await doPrint(printers[0], buildReceiptBytes(order, receiptConfig, printers[0].printerWidth || "58"));
+      const pr = printers[0];
+      const data = await buildReceiptBytes(order, receiptConfig, pr.printerWidth || "58", isCash && !!pr.cashDrawer);
+      await doPrint(pr, data);
     } else {
-      for (const p of cashierPrinters) await doPrint(p, buildReceiptBytes(order, receiptConfig, p.printerWidth || "58"));
+      for (const p of cashierPrinters) {
+        const data = await buildReceiptBytes(order, receiptConfig, p.printerWidth || "58", isCash && !!p.cashDrawer);
+        await doPrint(p, data);
+      }
     }
   }
 
@@ -753,8 +812,8 @@ export default function App() {
   }
 
   // ── Settings CRUD ────────────────────────────────────────────────────────
-  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [] }); setItemModal(true); };
-  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [] }); setItemModal(true); };
+  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [], imageBase64: "" }); setItemModal(true); };
+  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [], imageBase64: item.imageBase64 || "" }); setItemModal(true); };
   const toggleSoldOut = (id) => {
     setProducts(p => p.map(i => i.id === id ? { ...i, soldOut: !i.soldOut } : i));
   };
@@ -779,8 +838,8 @@ export default function App() {
   const saveSub = () => { if (!subF.name) return; if (editSub) setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: c.subcategories.map(s => s.id === editSub.id ? { ...s, name: subF.name } : s) } : c)); else setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: [...c.subcategories, { id: `s${Date.now()}`, name: subF.name }] } : c)); toast("✅ Dikemaskini"); setSubModal(false); };
   const delSub = (sId, cId) => { if (window.confirm("Padam sub?")) { setCategories(p => p.map(c => c.id === cId ? { ...c, subcategories: c.subcategories.filter(s => s.id !== sId) } : c)); toast("🗑️ Dipadam"); } };
 
-  const openAddPrinter = () => { setEditPrinter(null); setPF({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false, printerWidth: "58" }); setBtDevs([]); setPrinterModal(true); };
-  const openEditPrinter = (p) => { setEditPrinter(p); setPF({ name: p.name, type: p.type, btType: p.btType || "classic", ip: p.ip || "", port: p.port || "9100", deviceId: p.deviceId || "", location: p.location || "Kaunter", role: p.role || "cashier", showPrice: p.showPrice || false, printerWidth: p.printerWidth || "58" }); setPrinterModal(true); };
+  const openAddPrinter = () => { setEditPrinter(null); setPF({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false, printerWidth: "58", cashDrawer: false }); setBtDevs([]); setPrinterModal(true); };
+  const openEditPrinter = (p) => { setEditPrinter(p); setPF({ name: p.name, type: p.type, btType: p.btType || "classic", ip: p.ip || "", port: p.port || "9100", deviceId: p.deviceId || "", location: p.location || "Kaunter", role: p.role || "cashier", showPrice: p.showPrice || false, printerWidth: p.printerWidth || "58", cashDrawer: p.cashDrawer || false }); setPrinterModal(true); };
   const savePrinter = () => { if (!pF.name) return; const d = { ...pF, id: editPrinter ? editPrinter.id : `pr${Date.now()}` }; if (editPrinter) setPrinters(p => p.map(i => i.id === editPrinter.id ? d : i)); else setPrinters(p => [...p, d]); toast("✅ Printer disimpan"); setPrinterModal(false); };
   const delPrinter = (id) => { if (window.confirm("Padam printer?")) { setPrinters(p => p.filter(i => i.id !== id)); toast("🗑️ Dipadam"); } };
   const doScan = async () => { setScanning(true); toast("📡 Scan..."); const d = await (pF.btType === "ble" ? scanBTBLE() : scanBTClassic()); setBtDevs(d); setScanning(false); toast(d.length ? `${d.length} device` : "Tiada device", d.length ? "#4ade80" : "#f87171"); };
@@ -823,6 +882,22 @@ export default function App() {
     setActiveOrders(prev => { const n = { ...prev }; n[targetKey] = merged; delete n[mergeSourceKey]; return n; });
     setMergeMode(false); setMergeSourceKey(null);
     toast("✅ Order digabungkan!", "#4ade80");
+  }
+
+  // ── Move / Pindah Table ──────────────────────────────────────────────────
+  function startMoveTable(key) { setMoveSourceKey(key); setMoveTableModal(true); }
+  function doMoveTable(targetTable) {
+    const source = activeOrders[moveSourceKey];
+    if (!source) { setMoveTableModal(false); return; }
+    const occupied = Object.entries(activeOrders).some(([k, o]) => k !== moveSourceKey && o.tableId === targetTable.id);
+    if (occupied) { toast(`⚠️ ${targetTable.name} dah ada order. Guna Merge je.`, "#f59e0b"); return; }
+    setActiveOrders(prev => {
+      const n = { ...prev };
+      n[moveSourceKey] = { ...source, tableId: targetTable.id, tableNo: targetTable.name, displayName: `${targetTable.name} (Order #${source.num})` };
+      return n;
+    });
+    setMoveTableModal(false); setMoveSourceKey(null);
+    toast(`✅ Dipindah ke ${targetTable.name}`, "#4ade80");
   }
 
   // ── Edit Order (Draft — only committed on "Selesai Edit") ────────────────
@@ -1276,7 +1351,7 @@ export default function App() {
             const cartItem = !hasVariants ? qrCart.find(i => i._key === (isCombo ? `combo_${p.id}` : `item_${p.id}_`)) : null;
             return (
               <div key={p.id} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 14, padding: "12px 10px", textAlign: "center", boxShadow: "0 1px 4px rgba(0,0,0,.05)" }}>
-                <div style={{ fontSize: 32, marginBottom: 6 }}>{p.emoji}</div>
+                {p.imageBase64 ? <img src={p.imageBase64} alt={p.name} style={{ width: "100%", height: 70, objectFit: "cover", borderRadius: 8, marginBottom: 6 }} /> : <div style={{ fontSize: 32, marginBottom: 6 }}>{p.emoji}</div>}
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#1e293b", marginBottom: 4 }}>{p.name}</div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: isCombo ? "#f59e0b" : "#3b82f6", marginBottom: 10 }}>{formatRM(p.price)}</div>
                 {hasVariants ? (
@@ -1431,6 +1506,41 @@ export default function App() {
         </div>
       )}
 
+      {/* ── MOVE TABLE MODAL (Pindah Meja) ── */}
+      {moveTableModal && (
+        <div style={S.modal} onClick={() => { setMoveTableModal(false); setMoveSourceKey(null); }}>
+          <div style={{ ...S.mbox, maxWidth: 500 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>↔️ Pindah Meja</div>
+              <button onClick={() => { setMoveTableModal(false); setMoveSourceKey(null); }} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 36, height: 36, color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>
+              {activeOrders[moveSourceKey]?.displayName || activeOrders[moveSourceKey]?.tableNo || `Order #${activeOrders[moveSourceKey]?.num}`} — pilih meja destinasi
+            </div>
+            {sections.map(section => (
+              <div key={section} style={{ marginBottom: 16 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>{section}</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                  {tables.filter(t => t.section === section).map(t => {
+                    const isSource = activeOrders[moveSourceKey]?.tableId === t.id;
+                    const tableOrderCount = Object.values(activeOrders).filter(o => o.tableId === t.id && (o.orderKey || o.id) !== moveSourceKey).length;
+                    return (
+                      <button key={t.id}
+                        disabled={isSource}
+                        onClick={() => doMoveTable(t)}
+                        style={{ padding: "16px 8px", background: isSource ? "#e2e8f0" : tableOrderCount > 0 ? "#fff7ed" : "#f0fdf4", border: `2px solid ${isSource ? "#94a3b8" : tableOrderCount > 0 ? "#f59e0b" : "#22c55e"}`, borderRadius: 10, cursor: isSource ? "not-allowed" : "pointer", textAlign: "center", opacity: isSource ? 0.6 : 1 }}>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: isSource ? "#64748b" : tableOrderCount > 0 ? "#92400e" : "#166534" }}>{t.name.replace("Meja ", "")}</div>
+                        <div style={{ fontSize: 10, color: isSource ? "#64748b" : tableOrderCount > 0 ? "#92400e" : "#166534" }}>{isSource ? "Meja semasa" : tableOrderCount > 0 ? `⚡ ${tableOrderCount} order` : "Kosong"}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── PAY MODAL ── */}
       {showPayModal && selectedTable && activeOrders[selectedTable.id] && (
         <div style={S.modal}>
@@ -1565,7 +1675,7 @@ export default function App() {
                 <button key={p.id} onClick={() => !p.soldOut && addCart(p)} style={{ background: p.soldOut ? "#f1f5f9" : "#fff", border: "2px solid #e2e8f0", borderRadius: 12, padding: "14px 10px", cursor: p.soldOut ? "not-allowed" : "pointer", textAlign: "center", transition: "all .15s", opacity: p.soldOut ? 0.6 : 1 }}
                   onMouseEnter={e => { if (!p.soldOut) e.currentTarget.style.borderColor = "#3b82f6"; }}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
-                  <div style={{ fontSize: 28, marginBottom: 5 }}>{p.emoji}</div>
+                  {p.imageBase64 ? <img src={p.imageBase64} alt={p.name} style={{ width: "100%", height: 60, objectFit: "cover", borderRadius: 8, marginBottom: 5 }} /> : <div style={{ fontSize: 28, marginBottom: 5 }}>{p.emoji}</div>}
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 4, color: "#1e293b" }}>{p.name}</div>
                   {p.soldOut ? <div style={{ fontSize: 11, fontWeight: 700, color: "#ef4444", background: "#fef2f2", borderRadius: 6, padding: "2px 8px" }}>SOLD OUT</div> : <div style={{ fontSize: 14, fontWeight: 700, color: "#3b82f6" }}>{formatRM(p.price)}</div>}
                 </button>
@@ -1670,9 +1780,10 @@ export default function App() {
                             {isMergeSource ? "✕ Batal" : "⬅ Gabung ke sini"}
                           </button>
                         ) : (
-                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
                             <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                             <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
+                            <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                             <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
                             <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
                           </div>
@@ -1705,9 +1816,10 @@ export default function App() {
                           {isMergeSource ? "✕ Batal" : "⬅ Gabung ke sini"}
                         </button>
                       ) : (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
                           <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                           <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
+                          <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                           <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
                           <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
                         </div>
@@ -1917,7 +2029,7 @@ export default function App() {
                     const printer = printers.find(p => p.id === item.printerId);
                     return (
                       <div key={item.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, padding: "12px 14px", display: "flex", alignItems: "center", gap: 10 }}>
-                        <div style={{ fontSize: 28 }}>{item.emoji}</div>
+                        {item.imageBase64 ? <img src={item.imageBase64} alt={item.name} style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 8, flexShrink: 0 }} /> : <div style={{ fontSize: 28 }}>{item.emoji}</div>}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 600, fontSize: 14, color: "#1e293b" }}>{item.name}</div>
                           <div style={{ fontSize: 11, color: "#94a3b8" }}>{cat?.name}{s ? ` › ${s.name}` : ""}</div>
@@ -2142,7 +2254,7 @@ export default function App() {
                         reader.readAsDataURL(file);
                       }} />
                     </label>
-                    <div style={{ fontSize: 11, color: "#94a3b8" }}>PNG/JPG, max 200KB. Logo akan print sebagai teks ASCII art (thermal printer).</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>PNG/JPG, max 200KB. Logo akan print sebagai imej (bitmap) atas resit, di tengah header sebelum nama kedai.</div>
                   </div>
                 </div>
                 {/* Preview */}
@@ -2182,6 +2294,29 @@ export default function App() {
               <label style={S.lbl}>Emoji</label>
               <button onClick={() => setEmojiPick(!emojiPick)} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: "8px 14px", fontSize: 22, cursor: "pointer" }}>{itemF.emoji}</button>
               {emojiPick && <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 8, marginTop: 6, display: "flex", flexWrap: "wrap", gap: 4, maxHeight: 120, overflowY: "auto" }}>{EMOJIS.map(e => <button key={e} onClick={() => { setItemF(f => ({ ...f, emoji: e })); setEmojiPick(false); }} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer" }}>{e}</button>)}</div>}
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>Gambar Makanan (optional — kalau ada, gambar ni akan paparkan dalam grid menu, ganti emoji)</label>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                {itemF.imageBase64 ? (
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    <img src={itemF.imageBase64} alt={itemF.name} style={{ width: 64, height: 64, objectFit: "cover", borderRadius: 8, border: "1px solid #e2e8f0" }} />
+                    <button onClick={() => setItemF(f => ({ ...f, imageBase64: "" }))} style={{ position: "absolute", top: -6, right: -6, width: 18, height: 18, borderRadius: "50%", background: "#ef4444", border: "none", color: "#fff", fontSize: 10, cursor: "pointer", fontWeight: 700 }}>✕</button>
+                  </div>
+                ) : (
+                  <div style={{ width: 64, height: 64, borderRadius: 8, border: "2px dashed #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontSize: 10, textAlign: "center" }}>Tiada Gambar</div>
+                )}
+                <label style={{ padding: "8px 14px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 600, color: "#1e293b" }}>
+                  📁 Upload Gambar
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={e => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = ev => setItemF(f => ({ ...f, imageBase64: ev.target.result }));
+                    reader.readAsDataURL(file);
+                  }} />
+                </label>
+              </div>
             </div>
             <div style={{ marginBottom: 12 }}><label style={S.lbl}>Nama Item</label><input value={itemF.name} onChange={e => setItemF(f => ({ ...f, name: e.target.value }))} placeholder="Contoh: Nasi Lemak" style={S.inp} /></div>
             <div style={{ marginBottom: 12 }}><label style={S.lbl}>Harga (RM)</label><input type="number" value={itemF.price} onChange={e => setItemF(f => ({ ...f, price: e.target.value }))} placeholder="0.00" style={S.inp} /></div>
@@ -2396,6 +2531,16 @@ export default function App() {
                 ))}
               </div>
             </div>
+            {pF.role === "cashier" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={S.lbl}>🗄️ Laci Duit (Cash Drawer)</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => setPF(f => ({ ...f, cashDrawer: false }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: !pF.cashDrawer ? "#3b82f6" : "#f8fafc", color: !pF.cashDrawer ? "#fff" : "#64748b", borderColor: !pF.cashDrawer ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>Tiada</button>
+                  <button onClick={() => setPF(f => ({ ...f, cashDrawer: true }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: pF.cashDrawer ? "#3b82f6" : "#f8fafc", color: pF.cashDrawer ? "#fff" : "#64748b", borderColor: pF.cashDrawer ? "#3b82f6" : "#e2e8f0", fontWeight: 600, fontSize: 13 }}>Buka Auto (Cash)</button>
+                </div>
+                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Kalau "Buka Auto" dipilih, laci akan terbuka sendiri lepas bayaran TUNAI dicetak melalui printer ni (laci kena disambung ke port RJ11 printer).</div>
+              </div>
+            )}
             {pF.role !== "cashier" && (
               <div style={{ marginBottom: 12 }}>
                 <label style={S.lbl}>Kandungan Slip</label>
