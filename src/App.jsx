@@ -151,6 +151,8 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
   add(`No: #${order.num}  ${new Date(order.time).toLocaleString("ms-MY")}`);
   if (order.tableNo) add(`Meja: ${order.tableNo}`);
   if (order.orderType) add(`Jenis: ${order.orderType}`);
+  if (order.customerName) add(`Nama: ${order.customerName}`);
+  if (order.customerPhone) add(`Tel: ${order.customerPhone}`);
   add("-".repeat(W));
   order.cart.forEach(i => {
     const nm = i.isCombo ? `[SET] ${i.name}` : i.name;
@@ -161,6 +163,7 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
   const padW = W - 8;
   add(`${"Subtotal".padEnd(padW)}${formatRM(order.subtotal)}`);
   add(`${"SST (6%)".padEnd(padW)}${formatRM(order.tax)}`);
+  if (order.deliveryCharge > 0) add(`${"Caj Penghantaran".padEnd(padW)}${formatRM(order.deliveryCharge)}`);
   bytes.push(ESC, 0x45, 0x01);
   add(`${"JUMLAH".padEnd(padW)}${formatRM(order.total)}`);
   bytes.push(ESC, 0x45, 0x00);
@@ -193,6 +196,8 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
   add(`Order #${order.num}  ${fmtTime(order.time)}`);
   if (order.tableNo) add(`Meja: ${order.tableNo}`);
   if (order.orderType) add(`Jenis: ${order.orderType}`);
+  if (order.customerName) add(`Nama: ${order.customerName}`);
+  if (order.customerPhone) add(`Tel: ${order.customerPhone}`);
   add("-".repeat(W));
   items.forEach(i => {
     bytes.push(ESC, 0x45, 0x01);
@@ -204,7 +209,7 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
     }
     bytes.push(ESC, 0x45, 0x00);
     // Item dalam set — print bawah nama set (bukan tepi)
-    if (i.isCombo && i.comboItems) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
+    if (i.comboItems && i.comboItems.length > 0) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
     if (i.notes) add(`  >> ${i.notes}`);
   });
   add("-".repeat(W));
@@ -311,6 +316,10 @@ export default function App() {
 
   // Order creation flow
   const [showOrderTypeModal, setShowOrderTypeModal] = useState(false);
+  const [showDeliveryInfoModal, setShowDeliveryInfoModal] = useState(false);
+  const [deliveryName, setDeliveryName] = useState("");
+  const [deliveryPhone, setDeliveryPhone] = useState("");
+  const [deliveryChargeInput, setDeliveryChargeInput] = useState("");
   const [showTableModal, setShowTableModal] = useState(false);
   const [currentOrderType, setCurrentOrderType] = useState(null);
   const [currentTable, setCurrentTable] = useState(null);
@@ -331,7 +340,7 @@ export default function App() {
   // Settings modals
   const [itemModal, setItemModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [], imageBase64: "" });
+  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [] });
   const [variantModal, setVariantModal] = useState(false);
   const [variantItem, setVariantItem] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
@@ -355,6 +364,9 @@ export default function App() {
   const [comboDropdownVal, setComboDropdownVal] = useState("");
   const [showCustomItemForm, setShowCustomItemForm] = useState(false);
   const [customItemF, setCustomItemF] = useState({ name: "", printerId: "", qty: "1" });
+  const [itemDropdownVal, setItemDropdownVal] = useState("");
+  const [showItemCustomItemForm, setShowItemCustomItemForm] = useState(false);
+  const [itemCustomItemF, setItemCustomItemF] = useState({ name: "", printerId: "", qty: "1" });
   const [tableSetupModal, setTableSetupModal] = useState(false);
   const [tableF, setTableF] = useState({ name: "", section: "Dalam" });
   const [editTable, setEditTable] = useState(null);
@@ -474,7 +486,7 @@ export default function App() {
     const groups = {};
 
     order.cart.forEach(item => {
-      if (item.isCombo && item.comboItems) {
+      if (item.comboItems && item.comboItems.length > 0) {
         const comboPid = item.printerId || "";
         // Kumpul semua printer unique dari SEMUA sub-items (termasuk custom)
         const allSubItems = item.comboItems || [];
@@ -728,14 +740,15 @@ export default function App() {
     const key = isCombo ? `combo_${p.id}` : `item_${p.id}${variantSuffix}`;
     const finalPrice = variantOpt ? (p.price + (variantOpt.extraPrice || 0)) : p.price;
     const finalName = variantOpt ? `${p.name} (${variantOpt.name})` : p.name;
+    const buildExtras = (prod) => [
+      ...(prod.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+      ...(prod.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+    ];
     setCart(prev => {
       const e = prev.find(i => i._key === key);
       if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
-      if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: [
-        ...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
-        ...(p.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
-      ] }];
-      return [...prev, { _key: key, id: p.id, name: finalName, emoji: p.emoji, price: finalPrice, qty: 1, isCombo: false, printerId: p.printerId || "" }];
+      if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: buildExtras(p) }];
+      return [...prev, { _key: key, id: p.id, name: finalName, emoji: p.emoji, price: finalPrice, qty: 1, isCombo: false, printerId: p.printerId || "", comboItems: buildExtras(p) }];
     });
     toast(`${p.emoji} ${finalName} ditambah`);
   }
@@ -746,10 +759,15 @@ export default function App() {
   async function createOrder() {
     if (cart.length === 0) return;
     const num = orderNum;
+    const isDelivery = currentOrderType?.id === "delivery";
+    const deliveryChargeNum = isDelivery ? (parseFloat(deliveryChargeInput) || 0) : 0;
     const order = {
       id: `order_${Date.now()}`,
       num, cart: [...cart],
-      subtotal: sub, tax, total,
+      subtotal: sub, tax, total: total + deliveryChargeNum,
+      deliveryCharge: deliveryChargeNum,
+      customerName: isDelivery ? deliveryName.trim() : "",
+      customerPhone: isDelivery ? deliveryPhone.trim() : "",
       tableNo: currentTable?.name || "-",
       tableId: currentTable?.id || null,
       orderType: currentOrderType?.label || "Takeaway",
@@ -777,6 +795,7 @@ export default function App() {
     setPage("tables");
     setCurrentTable(null);
     setCurrentOrderType(null);
+    setDeliveryName(""); setDeliveryPhone(""); setDeliveryChargeInput("");
   }
 
   // ── Checkout / Pay ───────────────────────────────────────────────────────
@@ -812,8 +831,8 @@ export default function App() {
   }
 
   // ── Settings CRUD ────────────────────────────────────────────────────────
-  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [], imageBase64: "" }); setItemModal(true); };
-  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [], imageBase64: item.imageBase64 || "" }); setItemModal(true); };
+  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [] }); setItemModal(true); };
+  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [], imageBase64: item.imageBase64 || "", items: item.items || [], customItems: item.customItems || [] }); setItemModal(true); };
   const toggleSoldOut = (id) => {
     setProducts(p => p.map(i => i.id === id ? { ...i, soldOut: !i.soldOut } : i));
   };
@@ -858,6 +877,17 @@ export default function App() {
     setShowCustomItemForm(false);
   };
   const removeCustomComboItem = (customId) => setComboF(f => ({ ...f, customItems: (f.customItems || []).filter(i => i.customId !== customId) }));
+
+  const addItemExtra = (pid) => setItemF(f => { const e = (f.items || []).find(i => i.productId === pid); if (e) return { ...f, items: f.items.map(i => i.productId === pid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...(f.items || []), { productId: pid, qty: 1, printerId: "" }] }; });
+  const removeItemExtra = (pid) => setItemF(f => ({ ...f, items: (f.items || []).filter(i => i.productId !== pid) }));
+  const addCustomItemExtra = () => {
+    if (!itemCustomItemF.name.trim()) return;
+    const newItem = { customId: `custom_${Date.now()}`, name: itemCustomItemF.name.trim(), qty: parseInt(itemCustomItemF.qty) || 1, printerId: itemCustomItemF.printerId || "", isCustom: true };
+    setItemF(f => ({ ...f, customItems: [...(f.customItems || []), newItem] }));
+    setItemCustomItemF({ name: "", printerId: "", qty: "1" });
+    setShowItemCustomItemForm(false);
+  };
+  const removeCustomItemExtra = (customId) => setItemF(f => ({ ...f, customItems: (f.customItems || []).filter(i => i.customId !== customId) }));
 
   const openAddTable = () => { setEditTable(null); setTableF({ name: "", section: "Dalam" }); setTableSetupModal(true); };
   const openEditTable = (t) => { setEditTable(t); setTableF({ name: t.name, section: t.section }); setTableSetupModal(true); };
@@ -924,13 +954,11 @@ export default function App() {
         ex.qty += 1;
         setEditOrderNewItems(ni => {
           const n = [...ni]; const e2 = n.find(i => i._key === key);
-          if (e2) e2.qty += 1; else n.push({ _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo, printerId: p.printerId || "", comboItems: isCombo ? buildComboItems(p) : undefined });
+          if (e2) e2.qty += 1; else n.push({ _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo, printerId: p.printerId || "", comboItems: buildComboItems(p) });
           return n;
         });
       } else {
-        const newItem = isCombo
-          ? { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: buildComboItems(p) }
-          : { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, printerId: p.printerId || "" };
+        const newItem = { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo, printerId: p.printerId || "", comboItems: buildComboItems(p) };
         draft.push(newItem);
         setEditOrderNewItems(ni => {
           const n = [...ni]; const e2 = n.find(i => i._key === key);
@@ -960,7 +988,7 @@ export default function App() {
     } else {
       const order = activeOrders[editOrderKey];
       const newSub = draft.reduce((s, i) => s + i.price * i.qty, 0);
-      setActiveOrders(prev => ({ ...prev, [editOrderKey]: { ...order, cart: draft, subtotal: newSub, tax: newSub * taxRate, total: newSub * (1 + taxRate) } }));
+      setActiveOrders(prev => ({ ...prev, [editOrderKey]: { ...order, cart: draft, subtotal: newSub, tax: newSub * taxRate, total: newSub * (1 + taxRate) + (order.deliveryCharge || 0) } }));
       setEditOrderKey(null);
       setEditOrderDraft(null);
       // Auto-print new items to kitchen/bar printer with sending overlay
@@ -1195,11 +1223,15 @@ export default function App() {
 
     function qrAddItem(p, isCombo = false) {
       const key = isCombo ? `combo_${p.id}` : `item_${p.id}_`;
+      const buildExtras = (prod) => [
+        ...(prod.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+        ...(prod.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+      ];
       setQrCart(prev => {
         const e = prev.find(i => i._key === key);
         if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
-        if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: [...(p.items?.map(ci => { const prod = products.find(x => x.id === ci.productId); return { productId: ci.productId, name: prod?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || [])] }];
-        return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, variantLabel: "", printerId: p.printerId || "" }];
+        if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: buildExtras(p) }];
+        return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: false, variantLabel: "", printerId: p.printerId || "", comboItems: buildExtras(p) }];
       });
     }
     function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
@@ -1288,7 +1320,10 @@ export default function App() {
                   setQrCart(prev => {
                     const e = prev.find(i => i._key === key);
                     if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
-                    return [...prev, { _key: key, id: qrVariantItem.id, name: qrVariantItem.name, emoji: qrVariantItem.emoji, price, qty: 1, isCombo: false, variantLabel: sel?.name || "", printerId: qrVariantItem.printerId || "" }];
+                    return [...prev, { _key: key, id: qrVariantItem.id, name: qrVariantItem.name, emoji: qrVariantItem.emoji, price, qty: 1, isCombo: false, variantLabel: sel?.name || "", printerId: qrVariantItem.printerId || "", comboItems: [
+                      ...(qrVariantItem.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+                      ...(qrVariantItem.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+                    ] }];
                   });
                   setQrVariantItem(null);
                   setQrVariantSelected({});
@@ -1407,7 +1442,7 @@ export default function App() {
           {lastOrder.cart.map(i => (
             <div key={i._key} style={{ marginBottom: 5 }}>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}><span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span></div>
-              {i.isCombo && i.comboItems && i.comboItems.map(ci => <div key={ci.productId} style={{ fontSize: 11, color: "#888", paddingLeft: 16 }}>· {ci.name} x{ci.qty}</div>)}
+              {i.comboItems && i.comboItems.length > 0 && i.comboItems.map(ci => <div key={ci.productId || ci.customId} style={{ fontSize: 11, color: "#888", paddingLeft: 16 }}>· {ci.name} x{ci.qty}</div>)}
             </div>
           ))}
         </div>
@@ -1460,6 +1495,7 @@ export default function App() {
                   setCurrentOrderType(t);
                   setShowOrderTypeModal(false);
                   if (t.id === "dinein") setShowTableModal(true);
+                  else if (t.id === "delivery") { setDeliveryName(""); setDeliveryPhone(""); setDeliveryChargeInput(""); setShowDeliveryInfoModal(true); }
                   else { setCurrentTable(null); setPage("order"); setCart([]); }
                 }} style={{ padding: "20px 10px", background: "#f8fafc", border: `2px solid ${t.color}`, borderRadius: 12, cursor: "pointer", textAlign: "center" }}>
                   <div style={{ fontSize: 40, marginBottom: 8 }}>{t.emoji}</div>
@@ -1467,6 +1503,28 @@ export default function App() {
                 </button>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DELIVERY INFO MODAL ── */}
+      {showDeliveryInfoModal && (
+        <div style={S.modal}>
+          <div style={{ ...S.mbox, maxWidth: 420 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+              <div style={{ fontSize: 20, fontWeight: 700 }}>🛵 Maklumat Delivery</div>
+              <button onClick={() => { setShowDeliveryInfoModal(false); setShowOrderTypeModal(true); }} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 36, height: 36, color: "#fff", fontSize: 18, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Isi maklumat customer sebelum mula order.</div>
+            <label style={S.lbl}>Nama Customer</label>
+            <input value={deliveryName} onChange={e => setDeliveryName(e.target.value)} placeholder="cth: Ahmad" style={S.inp} />
+            <label style={S.lbl}>No. Telefon</label>
+            <input value={deliveryPhone} onChange={e => setDeliveryPhone(e.target.value)} placeholder="cth: 012-3456789" style={S.inp} />
+            <label style={S.lbl}>Caj Penghantaran (RM)</label>
+            <input type="number" value={deliveryChargeInput} onChange={e => setDeliveryChargeInput(e.target.value)} placeholder="0.00" style={S.inp} />
+            <button onClick={() => { setCurrentTable(null); setPage("order"); setCart([]); setShowDeliveryInfoModal(false); }} style={{ width: "100%", padding: 14, background: "#10b981", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer", marginTop: 8 }}>
+              Teruskan ke Menu →
+            </button>
           </div>
         </div>
       )}
@@ -1545,8 +1603,9 @@ export default function App() {
       {showPayModal && selectedTable && activeOrders[selectedTable.id] && (
         <div style={S.modal}>
           <div style={{ ...S.mbox, maxWidth: 420 }}>
-            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>💳 Bayaran — {selectedTable.name}</div>
-            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+            <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 4 }}>💳 Bayaran — {selectedTable.name}</div>
+            {activeOrders[selectedTable.id]?.customerName && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>👤 {activeOrders[selectedTable.id].customerName} · 📞 {activeOrders[selectedTable.id].customerPhone || "-"}</div>}
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16, marginTop: activeOrders[selectedTable.id]?.customerName ? 0 : 12 }}>
               {activeOrders[selectedTable.id]?.cart.map(i => (
                 <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
                   <span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span>
@@ -1554,7 +1613,8 @@ export default function App() {
               ))}
               <div style={{ borderTop: "1px solid #e2e8f0", marginTop: 8, paddingTop: 8 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(activeOrders[selectedTable.id]?.subtotal || 0)}</span></div>
-                {(activeOrders[selectedTable.id]?.tax || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(activeOrders[selectedTable.id]?.tax || 0)}</span></div>}
+                {(activeOrders[selectedTable.id]?.tax || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(activeOrders[selectedTable.id]?.tax || 0)}</span></div>}
+                {(activeOrders[selectedTable.id]?.deliveryCharge || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}><span>🛵 Caj Penghantaran</span><span>{formatRM(activeOrders[selectedTable.id].deliveryCharge)}</span></div>}
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b" }}><span>JUMLAH</span><span>{formatRM(activeOrders[selectedTable.id]?.total || 0)}</span></div>
               </div>
             </div>
@@ -1706,15 +1766,16 @@ export default function App() {
                       </div>
                       <div style={{ fontSize: 13, fontWeight: 700, minWidth: 52, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
                     </div>
-                    {i.isCombo && i.comboItems && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId} style={{ fontSize: 11, color: "#94a3b8" }}>· {ci.name} x{ci.qty}</div>)}</div>}
+                    {i.comboItems && i.comboItems.length > 0 && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId || ci.customId} style={{ fontSize: 11, color: "#94a3b8" }}>· {ci.name} x{ci.qty}</div>)}</div>}
                   </div>
                 ))}
             </div>
             {cart.length > 0 && (
               <div style={{ padding: "14px 16px", borderTop: "1px solid #e2e8f0" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(sub)}</span></div>
-                {tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 10 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(tax)}</span></div>}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}><span>JUMLAH</span><span>{formatRM(total)}</span></div>
+                {tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(tax)}</span></div>}
+                {currentOrderType?.id === "delivery" && (parseFloat(deliveryChargeInput) || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 10 }}><span>🛵 Caj Penghantaran</span><span>{formatRM(parseFloat(deliveryChargeInput) || 0)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}><span>JUMLAH</span><span>{formatRM(total + (currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0))}</span></div>
                 <button onClick={createOrder} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
                   🖨️ CREATE ORDER
                 </button>
@@ -1802,12 +1863,13 @@ export default function App() {
               <div style={{ fontSize: 14, fontWeight: 700, color: "#64748b", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Takeaway / Delivery</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12 }}>
                 {Object.values(activeOrders).filter(o => !o.tableId).map(order => {
-                  const oKey = order.id;
+                  const oKey = order.orderKey || order.id;
                   const isMergeTarget = mergeMode && mergeSourceKey !== oKey;
                   const isMergeSource = mergeMode && mergeSourceKey === oKey;
                   return (
                     <div key={oKey} style={{ background: isMergeTarget ? "#f0fdf4" : isMergeSource ? "#fef9c3" : "#f0fdf4", border: `2px solid ${isMergeTarget ? "#22c55e" : isMergeSource ? "#f59e0b" : "#22c55e"}`, borderRadius: 14, padding: 14 }}>
                       <div style={{ fontWeight: 700, color: "#166534", marginBottom: 4 }}>Order #{order.num}</div>
+                      {order.customerName && <div style={{ fontSize: 11, color: "#166534", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone || "-"}</div>}
                       <div style={{ fontSize: 12, color: "#166534", marginBottom: 2 }}>{order.cart.length} item · {order.orderType}</div>
                       <div style={{ fontSize: 18, fontWeight: 700, color: "#22c55e", marginBottom: 10 }}>{formatRM(order.total)}</div>
                       {mergeMode ? (
@@ -2343,6 +2405,87 @@ export default function App() {
                   </div>
                 ))}
                 <button onClick={() => setItemF(f => ({ ...f, variants: [...(f.variants || []), { name: "", extraPrice: 0 }] }))} style={{ padding: "5px 12px", background: "#f1f5f9", border: "1px dashed #94a3b8", borderRadius: 6, fontSize: 12, cursor: "pointer", color: "#64748b", fontWeight: 600, marginTop: 4 }}>+ Tambah Varian</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>🎁 Item Tambahan (optional) — sentiasa sertakan sekali bila item ni di-order (cth: air free dalam set)</label>
+              <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 180, overflowY: "auto" }}>
+                {(itemF.items || []).length === 0 && (itemF.customItems || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Tiada item tambahan</div>}
+                {(itemF.items || []).map(ci => {
+                  const p = products.find(x => x.id === ci.productId);
+                  return p ? (
+                    <div key={ci.productId} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, background: "#fff", borderRadius: 8, padding: "6px 8px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: 16 }}>{p.emoji}</span>
+                      <span style={{ fontSize: 13, flex: 1, fontWeight: 600 }}>{p.name}</span>
+                      <span style={{ fontSize: 11, color: "#64748b" }}>×{ci.qty}</span>
+                      <select value={ci.printerId || ""} onChange={e => setItemF(f => ({ ...f, items: f.items.map(i => i.productId === ci.productId ? { ...i, printerId: e.target.value } : i) }))}
+                        style={{ fontSize: 11, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, color: "#1e293b", padding: "3px 5px", maxWidth: 110 }}>
+                        <option value="">🖨️ Printer</option>
+                        {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                      </select>
+                      <button onClick={() => removeItemExtra(ci.productId)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                  ) : null;
+                })}
+                {(itemF.customItems || []).map(ci => (
+                  <div key={ci.customId} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, background: "#fff7ed", borderRadius: 8, padding: "6px 8px", border: "1px solid #f59e0b" }}>
+                    <span style={{ fontSize: 16 }}>✏️</span>
+                    <span style={{ fontSize: 13, flex: 1, fontWeight: 600 }}>{ci.name}</span>
+                    <span style={{ fontSize: 10, color: "#f59e0b", background: "#fff", borderRadius: 4, padding: "1px 5px", border: "1px solid #f59e0b" }}>Custom</span>
+                    <span style={{ fontSize: 11, color: "#64748b" }}>×{ci.qty}</span>
+                    <select value={ci.printerId || ""} onChange={e => setItemF(f => ({ ...f, customItems: (f.customItems || []).map(i => i.customId === ci.customId ? { ...i, printerId: e.target.value } : i) }))}
+                      style={{ fontSize: 11, background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 6, color: "#1e293b", padding: "3px 5px", maxWidth: 110 }}>
+                      <option value="">🖨️ Printer</option>
+                      {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                    </select>
+                    <button onClick={() => removeCustomItemExtra(ci.customId)} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 14 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>Tambah item (pilih dari dropdown):</div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                <select value={itemDropdownVal} onChange={e => { const val = e.target.value; if (val) { addItemExtra(val); setItemDropdownVal(""); } else { setItemDropdownVal(""); } }}
+                  style={{ ...S.sel, flex: 1, fontSize: 13 }}>
+                  <option value="">— Pilih item untuk tambah —</option>
+                  {categories.map(cat => (
+                    <optgroup key={cat.id} label={cat.name}>
+                      {products.filter(p => p.categoryId === cat.id).map(p => {
+                        const added = (itemF.items || []).find(i => i.productId === p.id);
+                        return <option key={p.id} value={p.id}>{p.emoji} {p.name} {added ? `(✓${added.qty})` : ""}</option>;
+                      })}
+                    </optgroup>
+                  ))}
+                </select>
+              </div>
+              <div style={{ borderTop: "1px dashed #e2e8f0", paddingTop: 8 }}>
+                <div style={{ fontSize: 12, color: "#64748b", marginBottom: 6, fontWeight: 600 }}>➕ Tambah item custom (khusus untuk item ini):</div>
+                {!showItemCustomItemForm ? (
+                  <button onClick={() => setShowItemCustomItemForm(true)} style={{ padding: "6px 14px", background: "#fff7ed", border: "1px dashed #f59e0b", borderRadius: 8, color: "#92400e", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>✏️ + Item Custom</button>
+                ) : (
+                  <div style={{ background: "#fff7ed", border: "1px solid #f59e0b", borderRadius: 8, padding: 10 }}>
+                    <div style={{ marginBottom: 8 }}>
+                      <label style={{ ...S.lbl, fontSize: 11 }}>Nama Item</label>
+                      <input value={itemCustomItemF.name} onChange={e => setItemCustomItemF(f => ({ ...f, name: e.target.value }))} placeholder="cth: Sos Cili Extra, Air Sirap..." style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }} />
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={{ ...S.lbl, fontSize: 11 }}>Qty</label>
+                        <input type="number" min="1" value={itemCustomItemF.qty} onChange={e => setItemCustomItemF(f => ({ ...f, qty: e.target.value }))} style={{ ...S.inp, fontSize: 12, padding: "7px 10px" }} />
+                      </div>
+                      <div style={{ flex: 2 }}>
+                        <label style={{ ...S.lbl, fontSize: 11 }}>Printer</label>
+                        <select value={itemCustomItemF.printerId} onChange={e => setItemCustomItemF(f => ({ ...f, printerId: e.target.value }))} style={{ ...S.sel, fontSize: 12, padding: "7px 10px" }}>
+                          <option value="">— Pilih Printer —</option>
+                          {printers.map(pr => <option key={pr.id} value={pr.id}>{pr.name}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => { setShowItemCustomItemForm(false); setItemCustomItemF({ name: "", printerId: "", qty: "1" }); }} style={{ flex: 1, padding: "7px 0", background: "#f1f5f9", border: "none", borderRadius: 6, color: "#64748b", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>Batal</button>
+                      <button onClick={addCustomItemExtra} style={{ flex: 2, padding: "7px 0", background: "#f59e0b", border: "none", borderRadius: 6, color: "#fff", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>✅ Tambah</button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
