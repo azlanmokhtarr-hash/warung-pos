@@ -867,7 +867,7 @@ export default function App() {
   const openEditCombo = (c) => { setEditCombo(c); setComboF({ name: c.name, emoji: c.emoji, price: c.price.toString(), categoryId: c.categoryId || "cat1", description: c.description || "", printerId: c.printerId || "", items: [...(c.items || [])], customItems: [...(c.customItems || [])] }); setComboModal(true); };
   const saveCombo = () => { if (!comboF.name || !comboF.price) return; const d = { ...comboF, price: parseFloat(comboF.price), id: editCombo ? editCombo.id : `combo_${Date.now()}` }; if (editCombo) setCombos(p => p.map(c => c.id === editCombo.id ? d : c)); else setCombos(p => [...p, d]); toast("✅ Combo disimpan"); setComboModal(false); };
   const delCombo = (id) => { if (window.confirm("Padam combo?")) { setCombos(p => p.filter(c => c.id !== id)); toast("🗑️ Dipadam"); } };
-  const addComboItem = (pid) => setComboF(f => { const e = f.items.find(i => i.productId === pid); if (e) return { ...f, items: f.items.map(i => i.productId === pid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...f.items, { productId: pid, qty: 1, printerId: "" }] }; });
+  const addComboItem = (pid) => setComboF(f => { const nid = Number(pid); const e = f.items.find(i => i.productId === nid); if (e) return { ...f, items: f.items.map(i => i.productId === nid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...f.items, { productId: nid, qty: 1, printerId: "" }] }; });
   const removeComboItem = (pid) => setComboF(f => ({ ...f, items: f.items.filter(i => i.productId !== pid) }));
   const addCustomComboItem = () => {
     if (!customItemF.name.trim()) return;
@@ -878,7 +878,7 @@ export default function App() {
   };
   const removeCustomComboItem = (customId) => setComboF(f => ({ ...f, customItems: (f.customItems || []).filter(i => i.customId !== customId) }));
 
-  const addItemExtra = (pid) => setItemF(f => { const e = (f.items || []).find(i => i.productId === pid); if (e) return { ...f, items: f.items.map(i => i.productId === pid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...(f.items || []), { productId: pid, qty: 1, printerId: "" }] }; });
+  const addItemExtra = (pid) => setItemF(f => { const nid = Number(pid); const e = (f.items || []).find(i => i.productId === nid); if (e) return { ...f, items: f.items.map(i => i.productId === nid ? { ...i, qty: i.qty + 1 } : i) }; return { ...f, items: [...(f.items || []), { productId: nid, qty: 1, printerId: "" }] }; });
   const removeItemExtra = (pid) => setItemF(f => ({ ...f, items: (f.items || []).filter(i => i.productId !== pid) }));
   const addCustomItemExtra = () => {
     if (!itemCustomItemF.name.trim()) return;
