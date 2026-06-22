@@ -1186,7 +1186,7 @@ export default function App() {
   const [qrMenuLoaded, setQrMenuLoaded] = useState(!isQROrderPage);
 
   // Load menu dari Firestore untuk QR page
-  const [qrShiftOpen, setQrShiftOpen] = useState(true); // assume open until checked
+  const [qrShiftOpen, setQrShiftOpen] = useState(false); // block until Firestore confirms open
   useEffect(() => {
     if (!isQROrderPage) return;
     import("firebase/firestore").then(({ getDoc }) => {
@@ -1327,7 +1327,7 @@ export default function App() {
                 <button key={v.name} onClick={() => setQrVariantSelected(s => ({ ...s, [qrVariantItem.id]: v }))}
                   style={{ width: "100%", padding: "12px 16px", marginBottom: 8, border: `2px solid ${qrVariantSelected[qrVariantItem.id]?.name === v.name ? "#3b82f6" : "#e2e8f0"}`, borderRadius: 10, background: qrVariantSelected[qrVariantItem.id]?.name === v.name ? "#eff6ff" : "#fff", display: "flex", justifyContent: "space-between", cursor: "pointer" }}>
                   <span style={{ fontWeight: 600 }}>{v.name}</span>
-                  <span style={{ color: "#3b82f6", fontWeight: 700 }}>{v.price > 0 ? `+${formatRM(v.price)}` : formatRM(qrVariantItem.price)}</span>
+                  <span style={{ color: "#3b82f6", fontWeight: 700 }}>{formatRM(qrVariantItem.price + (v.extraPrice || 0))}</span>
                 </button>
               ))}
               <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
@@ -1335,7 +1335,7 @@ export default function App() {
                 <button onClick={() => {
                   const sel = qrVariantSelected[qrVariantItem.id];
                   if (!sel && qrVariantItem.variants?.length > 0) { alert("Sila pilih varian"); return; }
-                  const price = sel ? (sel.price > 0 ? qrVariantItem.price + sel.price : qrVariantItem.price) : qrVariantItem.price;
+                  const price = sel ? qrVariantItem.price + (sel.extraPrice || 0) : qrVariantItem.price;
                   const key = `item_${qrVariantItem.id}_${sel?.name || ""}`;
                   setQrCart(prev => {
                     const e = prev.find(i => i._key === key);
