@@ -374,6 +374,8 @@ export default function App() {
   const [histFilter, setHistFilter] = useState("all");
   const [histDateFilter, setHistDateFilter] = useState(""); // YYYY-MM-DD
   const [settingsTab, setSettingsTab] = useState("menu"); // menu | printers | categories | tables
+  const [menuSearch, setMenuSearch] = useState("");
+  const [menuCatFilter, setMenuCatFilter] = useState("all");
   const [salesFilter, setSalesFilter] = useState("week");
   const [salesPickDate, setSalesPickDate] = useState("");
   const [salesPickMonth, setSalesPickMonth] = useState("");
@@ -573,6 +575,8 @@ export default function App() {
     setShiftModal(false);
     setShiftF({ name: "", float: "" });
     toast(`✅ Shift "${shift.name}" dibuka`, "#22c55e");
+    // Sync ke Firestore supaya QR page tahu kedai buka
+    import("firebase/firestore").then(({ setDoc }) => { setDoc(doc(db, "config", "shiftStatus"), { open: true, shiftName: shift.name, openTime: shift.openTime }).catch(() => {}); });
   }
 
   function closeShift() {
@@ -592,6 +596,8 @@ export default function App() {
     setCloseShiftModal(false);
     setCloseF({ actualCash: "" });
     toast(`✅ Shift "${closed.name}" ditutup`, "#22c55e");
+    // Sync ke Firestore — kedai tutup
+    import("firebase/firestore").then(({ setDoc }) => { setDoc(doc(db, "config", "shiftStatus"), { open: false }).catch(() => {}); });
     // Auto print report
     printShiftReport(closed, true);
   }
@@ -1180,6 +1186,7 @@ export default function App() {
   const [qrMenuLoaded, setQrMenuLoaded] = useState(!isQROrderPage);
 
   // Load menu dari Firestore untuk QR page
+  const [qrShiftOpen, setQrShiftOpen] = useState(true); // assume open until checked
   useEffect(() => {
     if (!isQROrderPage) return;
     import("firebase/firestore").then(({ getDoc }) => {
@@ -1191,12 +1198,15 @@ export default function App() {
           if (data.categories) setCategories(data.categories);
           if (data.tables) setTables(data.tables);
           if (typeof data.taxRate === "number") {
-            // Convert taxRate back to taxConfig format
             setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
           }
         }
         setQrMenuLoaded(true);
       }).catch(() => setQrMenuLoaded(true));
+      // Check shift status
+      getDoc(doc(db, "config", "shiftStatus")).then(snap => {
+        if (snap.exists()) setQrShiftOpen(snap.data().open !== false);
+      }).catch(() => {});
     });
   }, []);
 
@@ -1204,6 +1214,15 @@ export default function App() {
     if (!qrMenuLoaded) return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div><div style={{ fontSize: 14, color: "#64748b" }}>Memuatkan menu...</div></div>
+      </div>
+    );
+    if (!qrShiftOpen) return (
+      <div style={{ minHeight: "100vh", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ textAlign: "center", color: "#fff" }}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>🌙</div>
+          <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Kedai Sedang Tutup</div>
+          <div style={{ fontSize: 14, color: "#94a3b8" }}>Terima kasih kerana berkunjung! Sila datang semula apabila kedai dibuka.</div>
+        </div>
       </div>
     );
     const qrFiltered = products.filter(p =>
@@ -1237,6 +1256,7 @@ export default function App() {
     function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
 
     async function qrSubmitOrder() {
+      if (!qrShiftOpen) return alert("Maaf, kedai sedang tutup. Sila order semula apabila kedai dibuka.");
       if (!qrName.trim()) return alert("Sila masukkan nama anda");
       if (!validatePhone(qrPhone)) return alert("No. telefon tidak sah. Mesti bermula dengan 01 (contoh: 0123456789)");
       if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
@@ -1800,7 +1820,7 @@ export default function App() {
                   🔔 {newPendingCount} QR Order Baru
                 </button>
               )}
-              <button onClick={() => setShowOrderTypeModal(true)} style={{ padding: "12px 24px", background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>+ Create New Order</button>
+              <button onClick={() => { if (!currentShift) { toast("⚠️ Buka shift dulu sebelum boleh buat order!", "#ef4444"); return; } setShowOrderTypeModal(true); }} style={{ padding: "12px 24px", background: currentShift ? "#3b82f6" : "#94a3b8", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: currentShift ? "pointer" : "not-allowed" }}>+ Create New Order</button>
             </div>
           </div>
 
@@ -2084,8 +2104,15 @@ export default function App() {
                   </div>
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>Item Menu ({products.length})</div>
+                <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                  <input value={menuSearch} onChange={e => setMenuSearch(e.target.value)} placeholder="🔍 Cari item..." style={{ ...S.inp, flex: 1, marginBottom: 0 }} />
+                  <select value={menuCatFilter} onChange={e => setMenuCatFilter(e.target.value)} style={{ ...S.sel, minWidth: 140 }}>
+                    <option value="all">Semua Kategori</option>
+                    {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                </div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 10, marginBottom: 24 }}>
-                  {products.map(item => {
+                  {products.filter(item => (menuCatFilter === "all" || item.categoryId === menuCatFilter) && item.name.toLowerCase().includes(menuSearch.toLowerCase())).map(item => {
                     const cat = categories.find(c => c.id === item.categoryId);
                     const s = cat?.subcategories.find(x => x.id === item.subcategoryId);
                     const printer = printers.find(p => p.id === item.printerId);
@@ -2907,13 +2934,13 @@ export default function App() {
               {categories.map(c => <button key={c.id} onClick={() => { setEditOrderCat(c.id); setEditOrderShowCombos(false); }} style={{ padding: "4px 12px", borderRadius: 20, border: "1px solid", fontSize: 11, cursor: "pointer", background: editOrderCat === c.id && !editOrderShowCombos ? "#3b82f6" : "#f8fafc", color: editOrderCat === c.id && !editOrderShowCombos ? "#fff" : "#64748b", borderColor: editOrderCat === c.id && !editOrderShowCombos ? "#3b82f6" : "#e2e8f0" }}>{c.name}</button>)}
             </div>
             <input value={editOrderSearch} onChange={e => setEditOrderSearch(e.target.value)} placeholder="🔍 Cari item..." style={{ ...S.inp, marginBottom: 8 }} />
-            <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 8, minHeight: 120 }}>
+            <div style={{ flex: 1, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))", gap: 6, minHeight: 100 }}>
               {(editOrderShowCombos ? combos : products.filter(p => (editOrderCat === "all" || p.categoryId === editOrderCat) && p.name.toLowerCase().includes(editOrderSearch.toLowerCase()))).map(p => (
-                <button key={p.id} onClick={() => editOrderAddItem(p, editOrderShowCombos)} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 10, padding: "10px 8px", cursor: "pointer", textAlign: "center" }}
+                <button key={p.id} onClick={() => editOrderAddItem(p, editOrderShowCombos)} style={{ background: "#fff", border: "2px solid #e2e8f0", borderRadius: 8, padding: "6px 4px", cursor: "pointer", textAlign: "center" }}
                   onMouseEnter={e => e.currentTarget.style.borderColor = "#3b82f6"} onMouseLeave={e => e.currentTarget.style.borderColor = "#e2e8f0"}>
-                  <div style={{ fontSize: 24, marginBottom: 4 }}>{p.emoji}</div>
-                  <div style={{ fontSize: 11, fontWeight: 700, marginBottom: 2 }}>{p.name}</div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#3b82f6" }}>{formatRM(p.price)}</div>
+                  {p.imageBase64 ? <img src={p.imageBase64} alt={p.name} style={{ width: "100%", height: 40, objectFit: "cover", borderRadius: 5, marginBottom: 2 }} /> : <div style={{ fontSize: 18, marginBottom: 2 }}>{p.emoji}</div>}
+                  <div style={{ fontSize: 9, fontWeight: 700, marginBottom: 1, lineHeight: 1.2 }}>{p.name}</div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#3b82f6" }}>{formatRM(p.price)}</div>
                 </button>
               ))}
             </div>
@@ -3032,7 +3059,7 @@ export default function App() {
 
       {/* ── BIG QR ORDER ALERT ── */}
       {pendingAlert && !isQROrderPage && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 999, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 2000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
           <div style={{ background: "#fff", borderRadius: 20, padding: 28, maxWidth: 420, width: "100%", boxShadow: "0 8px 40px rgba(0,0,0,.3)" }}>
             <div style={{ textAlign: "center", marginBottom: 16 }}>
               <div style={{ fontSize: 48, marginBottom: 8 }}>🔔</div>
@@ -3063,8 +3090,8 @@ export default function App() {
 
       {/* ── QR ORDER MODAL ── */}
       {showQRModal && (
-        <div style={S.modal} onClick={() => setShowQRModal(false)}>
-          <div style={{ ...S.mbox, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+        <div style={S.modal}>
+          <div style={{ ...S.mbox, maxWidth: 560 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
               <div style={{ fontSize: 17, fontWeight: 700 }}>📱 QR Order — Self Order per Meja</div>
               <button onClick={() => setShowQRModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
