@@ -156,20 +156,36 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
   add("-".repeat(W));
   order.cart.forEach(i => {
     const nm = i.isCombo ? `[SET] ${i.name}` : i.name;
-    const l = `${nm} x${i.qty}`, r = formatRM(i.price * i.qty);
-    add(l + " ".repeat(Math.max(1, W - l.length - r.length)) + r);
+    // Wrap nama kalau panjang, harga kekal kat baris nama pertama
+    const price = formatRM(i.price * i.qty);
+    const firstLine = `${nm} x${i.qty}`;
+    if (firstLine.length + price.length + 1 <= W) {
+      add(firstLine + " ".repeat(Math.max(1, W - firstLine.length - price.length)) + price);
+    } else {
+      // Nama terlalu panjang — wrap nama, letak harga kat baris tersendiri
+      add(firstLine);
+      add(" ".repeat(Math.max(1, W - price.length)) + price);
+    }
+    // Print sub-items (extras) bawah item utama
+    if (i.comboItems && i.comboItems.length > 0) {
+      i.comboItems.forEach(ci => add(`  + ${ci.name} x${ci.qty}`));
+    }
+    if (i.note) add(`  >> ${i.note}`);
   });
   add("-".repeat(W));
   const padW = W - 8;
   add(`${"Subtotal".padEnd(padW)}${formatRM(order.subtotal)}`);
-  add(`${"SST (6%)".padEnd(padW)}${formatRM(order.tax)}`);
+  if (order.tax > 0) add(`${"SST (6%)".padEnd(padW)}${formatRM(order.tax)}`);
+  if ((order.discount || 0) > 0) add(`${"Diskaun".padEnd(padW)}-${formatRM(order.discount)}`);
   if (order.deliveryCharge > 0) add(`${"Caj Penghantaran".padEnd(padW)}${formatRM(order.deliveryCharge)}`);
   bytes.push(ESC, 0x45, 0x01);
   add(`${"JUMLAH".padEnd(padW)}${formatRM(order.total)}`);
   bytes.push(ESC, 0x45, 0x00);
   if (order.method === "cash") {
-    add(`${"Tunai".padEnd(padW)}${formatRM(order.cash)}`);
-    add(`${"Baki".padEnd(padW)}${formatRM(order.change)}`);
+    const cashLine = `${"Tunai".padEnd(padW)}${formatRM(order.cash)}`;
+    const bakiLine = `${"Baki".padEnd(padW)}${formatRM(order.change)}`;
+    add(cashLine);
+    add(bakiLine);
   }
   add("-".repeat(W));
   bytes.push(ESC, 0x61, 0x01);
@@ -210,6 +226,7 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
     bytes.push(ESC, 0x45, 0x00);
     // Item dalam set — print bawah nama set (bukan tepi)
     if (i.comboItems && i.comboItems.length > 0) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
+    if (i.note) { bytes.push(ESC, 0x45, 0x01); add(`  >> ${i.note}`); bytes.push(ESC, 0x45, 0x00); }
     if (i.notes) add(`  >> ${i.notes}`);
   });
   add("-".repeat(W));
@@ -329,11 +346,19 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [showCombos, setShowCombos] = useState(false);
 
+  // Item notes
+  const [noteModal, setNoteModal] = useState(false);
+  const [noteTargetKey, setNoteTargetKey] = useState(null);
+  const [noteText, setNoteText] = useState("");
+  const [savedNotes, setSavedNotes] = useLocalStorage("pos_saved_notes", ["Taknak bawang", "Pedas sikit", "Tak pedas", "Extra sos", "Kurang manis", "Tapau", "Sikit nasi"]);
+  const [newSavedNote, setNewSavedNote] = useState("");
+
   // Table view
   const [selectedTable, setSelectedTable] = useState(null);
   const [showPayModal, setShowPayModal] = useState(false);
   const [payMethod, setPayMethod] = useState("cash");
   const [cashIn, setCashIn] = useState("");
+  const [discountInput, setDiscountInput] = useState("");
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastOrder, setLastOrder] = useState(null);
 
@@ -489,36 +514,24 @@ export default function App() {
 
     order.cart.forEach(item => {
       if (item.comboItems && item.comboItems.length > 0) {
-        const comboPid = item.printerId || "";
-        // Kumpul semua printer unique dari SEMUA sub-items (termasuk custom)
-        const allSubItems = item.comboItems || [];
-        const subPrinters = [...new Set(allSubItems.map(ci => ci.printerId || "").filter(Boolean))];
+        const mainPid = item.printerId || "";
 
-        if (subPrinters.length > 0) {
-          subPrinters.forEach(pid => {
-            if (!groups[pid]) groups[pid] = [];
-            const subItems = allSubItems.filter(ci => (ci.printerId || "") === pid);
-            if (subItems.length === 0) return;
-            // Check kalau printer ni dah ada entry untuk combo yang sama
-            const existing = groups[pid].find(g => g._key === item._key && g.isCombo);
-            if (existing) {
-              // Merge subItems ke existing entry
-              existing.comboItems = [...(existing.comboItems || []), ...subItems];
-            } else {
-              groups[pid].push({ ...item, isCombo: true, comboItems: subItems });
-            }
-          });
-          // Kalau ada sub-items yang takde printer assign, hantar ke combo printer
-          const unassigned = allSubItems.filter(ci => !ci.printerId);
-          if (unassigned.length > 0 && comboPid) {
-            if (!groups[comboPid]) groups[comboPid] = [];
-            groups[comboPid].push({ ...item, isCombo: true, comboItems: unassigned });
-          }
-        } else if (comboPid) {
-          // Semua items takde printer — hantar semua ke combo printer
-          if (!groups[comboPid]) groups[comboPid] = [];
-          groups[comboPid].push({ ...item });
+        // 1. Hantar item UTAMA ke printer dia sendiri (dengan extras yang takde printer assign)
+        const unassignedExtras = item.comboItems.filter(ci => !ci.printerId);
+        if (mainPid) {
+          if (!groups[mainPid]) groups[mainPid] = [];
+          groups[mainPid].push({ ...item, comboItems: unassignedExtras });
         }
+
+        // 2. Hantar extras yang ada printer assign ke printer masing-masing
+        const assignedExtras = item.comboItems.filter(ci => ci.printerId);
+        const extraPrinters = [...new Set(assignedExtras.map(ci => ci.printerId))];
+        extraPrinters.forEach(pid => {
+          if (!groups[pid]) groups[pid] = [];
+          const subItems = assignedExtras.filter(ci => ci.printerId === pid);
+          // Print item utama sekali sebagai konteks, tapi highlight extras
+          groups[pid].push({ ...item, comboItems: subItems });
+        });
       } else {
         const pid = item.printerId || "";
         if (!pid) return;
@@ -806,11 +819,15 @@ export default function App() {
 
   // ── Checkout / Pay ───────────────────────────────────────────────────────
   async function checkout(order, printRec = true) {
+    const discount = parseFloat(discountInput) || 0;
+    const finalTotal = Math.max(0, order.total - discount);
     const paidOrder = {
       ...order,
+      discount,
+      total: finalTotal,
       method: payMethod,
       cash: parseFloat(cashIn) || 0,
-      change: parseFloat(cashIn) - order.total,
+      change: parseFloat(cashIn) - finalTotal,
       status: "paid",
       paidAt: new Date(),
     };
@@ -1562,7 +1579,7 @@ export default function App() {
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b", marginBottom: 8 }}>{section}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
                 {tables.filter(t => t.section === section).map(t => {
-                    const tableOrderCount = Object.values(activeOrders).filter(o => o.tableId === t.id).length;
+                    const tableOrderCount = Object.values(activeOrders).filter(o => o.tableId === t.id && !o.isDraft).length;
                     return (
                       <button key={t.id}
                         onClick={() => {
@@ -1580,6 +1597,37 @@ export default function App() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── NOTE MODAL ── */}
+      {noteModal && (
+        <div style={S.modal} onClick={() => setNoteModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>📝 Note untuk Item</div>
+              <button onClick={() => setNoteModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>Saved notes — tekan untuk guna:</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+              {savedNotes.map((n, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                  <button onClick={() => setNoteText(noteText ? `${noteText}, ${n}` : n)} style={{ padding: "4px 10px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 20, fontSize: 12, cursor: "pointer", color: "#1e293b" }}>{n}</button>
+                  <button onClick={() => setSavedNotes(s => s.filter((_, j) => j !== i))} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 11, padding: "0 2px" }}>✕</button>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              <input value={newSavedNote} onChange={e => setNewSavedNote(e.target.value)} placeholder="Tambah saved note baru..." style={{ ...S.inp, flex: 1, marginBottom: 0, fontSize: 12 }} />
+              <button onClick={() => { if (newSavedNote.trim()) { setSavedNotes(s => [...s, newSavedNote.trim()]); setNewSavedNote(""); } }} style={{ padding: "8px 12px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>+ Simpan</button>
+            </div>
+            <label style={S.lbl}>Note untuk item ini:</label>
+            <textarea value={noteText} onChange={e => setNoteText(e.target.value)} placeholder="cth: Taknak bawang, pedas sikit..." rows={3} style={{ width: "100%", padding: "10px 12px", border: "1px solid #e2e8f0", borderRadius: 8, fontSize: 13, resize: "vertical", boxSizing: "border-box", marginBottom: 12 }} />
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setCart(c => c.map(i => i._key === noteTargetKey ? { ...i, note: "" } : i)); setNoteModal(false); }} style={{ flex: 1, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>🗑️ Clear</button>
+              <button onClick={() => { setCart(c => c.map(i => i._key === noteTargetKey ? { ...i, note: noteText.trim() } : i)); setNoteModal(false); }} style={{ flex: 2, padding: 10, background: "#f59e0b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>✅ Simpan Note</button>
+            </div>
           </div>
         </div>
       )}
@@ -1635,8 +1683,13 @@ export default function App() {
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(activeOrders[selectedTable.id]?.subtotal || 0)}</span></div>
                 {(activeOrders[selectedTable.id]?.tax || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(activeOrders[selectedTable.id]?.tax || 0)}</span></div>}
                 {(activeOrders[selectedTable.id]?.deliveryCharge || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 6 }}><span>🛵 Caj Penghantaran</span><span>{formatRM(activeOrders[selectedTable.id].deliveryCharge)}</span></div>}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b" }}><span>JUMLAH</span><span>{formatRM(activeOrders[selectedTable.id]?.total || 0)}</span></div>
+                {(parseFloat(discountInput) || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#ef4444", marginBottom: 6 }}><span>🏷️ Diskaun</span><span>-{formatRM(parseFloat(discountInput) || 0)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b" }}><span>JUMLAH</span><span>{formatRM(Math.max(0, (activeOrders[selectedTable.id]?.total || 0) - (parseFloat(discountInput) || 0)))}</span></div>
               </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>🏷️ Diskaun (RM) — optional</label>
+              <input type="number" value={discountInput} onChange={e => setDiscountInput(e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 0 }} />
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>Kaedah Bayaran</label>
@@ -1653,12 +1706,12 @@ export default function App() {
                 <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
                   {[10, 20, 50, 100].map(a => <button key={a} onClick={() => setCashIn(a.toString())} style={{ flex: 1, padding: "8px 0", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer", fontSize: 13, fontWeight: 600, color: "#000" }}>RM{a}</button>)}
                 </div>
-                {cashIn && parseFloat(cashIn) >= (activeOrders[selectedTable.id]?.total || 0) && (
+                {cashIn && parseFloat(cashIn) >= Math.max(0, (activeOrders[selectedTable.id]?.total || 0) - (parseFloat(discountInput) || 0)) && (
                   <div style={{ background: "#f0fdf4", border: "1px solid #22c55e", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", fontSize: 14, color: "#166534", fontWeight: 600 }}>
-                    <span>Baki:</span><span>{formatRM(change)}</span>
+                    <span>Baki:</span><span>{formatRM(parseFloat(cashIn) - Math.max(0, (activeOrders[selectedTable.id]?.total || 0) - (parseFloat(discountInput) || 0)))}</span>
                   </div>
                 )}
-                {cashIn && parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0) && (
+                {cashIn && parseFloat(cashIn) < Math.max(0, (activeOrders[selectedTable.id]?.total || 0) - (parseFloat(discountInput) || 0)) && (
                   <div style={{ background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#dc2626" }}>⚠️ Wang tidak mencukupi</div>
                 )}
               </div>
@@ -1787,6 +1840,10 @@ export default function App() {
                       <div style={{ fontSize: 13, fontWeight: 700, minWidth: 52, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
                     </div>
                     {i.comboItems && i.comboItems.length > 0 && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId || ci.customId} style={{ fontSize: 11, color: "#94a3b8" }}>· {ci.name} x{ci.qty}</div>)}</div>}
+                    <div style={{ paddingLeft: 28, marginTop: 2, display: "flex", alignItems: "center", gap: 6 }}>
+                      {i.note && <span style={{ fontSize: 10, color: "#f59e0b", background: "#fff7ed", borderRadius: 4, padding: "1px 6px", border: "1px solid #f59e0b" }}>📝 {i.note}</span>}
+                      <button onClick={() => { setNoteTargetKey(i._key); setNoteText(i.note || ""); setNoteModal(true); }} style={{ fontSize: 10, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0 }}>{i.note ? "✏️ Edit note" : "+ Add note"}</button>
+                    </div>
                   </div>
                 ))}
             </div>
@@ -1799,7 +1856,27 @@ export default function App() {
                 <button onClick={createOrder} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
                   🖨️ CREATE ORDER
                 </button>
-                <button onClick={() => { setPage("tables"); setCart([]); }} style={{ width: "100%", marginTop: 8, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 13 }}>← Balik</button>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button onClick={() => { setPage("tables"); setCart([]); }} style={{ flex: 1, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 12 }}>← Balik</button>
+                  <button onClick={() => {
+                    if (cart.length === 0) return;
+                    const draftKey = `draft_${Date.now()}`;
+                    const draft = {
+                      orderKey: draftKey, id: draftKey, num: orderNum, cart: [...cart],
+                      subtotal: sub, tax, total: total + (currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0),
+                      deliveryCharge: currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0,
+                      customerName: deliveryName.trim(), customerPhone: deliveryPhone.trim(),
+                      tableNo: currentTable?.name || "-", tableId: currentTable?.id || null,
+                      orderType: currentOrderType?.label || "Takeaway",
+                      time: new Date(), status: "draft", isDraft: true,
+                      displayName: currentTable ? `${currentTable.name} (Draft)` : `Draft #${orderNum}`,
+                    };
+                    setActiveOrders(prev => ({ ...prev, [draftKey]: draft }));
+                    setOrderNum(n => n + 1);
+                    setCart([]); setPage("tables"); setCurrentTable(null); setCurrentOrderType(null);
+                    toast("💾 Draft disimpan!", "#8b5cf6");
+                  }} style={{ flex: 1, padding: 10, background: "#ede9fe", border: "1px solid #8b5cf6", borderRadius: 8, color: "#7c3aed", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>💾 Save Draft</button>
+                </div>
               </div>
             )}
           </div>
@@ -1862,7 +1939,7 @@ export default function App() {
                           </button>
                         ) : (
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                            <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                            <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                             <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
                             <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                             <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
@@ -1877,12 +1954,40 @@ export default function App() {
             );
           })}
 
+          {/* Draft Orders */}
+          {Object.values(activeOrders).filter(o => o.isDraft).length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: "#7c3aed", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>💾 Draft (Belum Create)</div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12 }}>
+                {Object.values(activeOrders).filter(o => o.isDraft).map(order => {
+                  const oKey = order.orderKey || order.id;
+                  return (
+                    <div key={oKey} style={{ background: "#faf5ff", border: "2px dashed #8b5cf6", borderRadius: 14, padding: 14 }}>
+                      <div style={{ fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>{order.displayName || `Draft #${order.num}`}</div>
+                      <div style={{ fontSize: 12, color: "#7c3aed", marginBottom: 2 }}>{order.cart.length} item · {order.orderType}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: "#8b5cf6", marginBottom: 10 }}>{formatRM(order.total)}</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <button onClick={() => {
+                          setCart(order.cart); setCurrentTable(order.tableId ? tables.find(t => t.id === order.tableId) || null : null);
+                          setCurrentOrderType(ORDER_TYPES.find(t => t.label === order.orderType) || null);
+                          setActiveOrders(prev => { const n = { ...prev }; delete n[oKey]; return n; });
+                          setPage("order");
+                        }} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>▶ Sambung</button>
+                        <button onClick={() => { if (window.confirm("Padam draft?")) { setActiveOrders(prev => { const n = { ...prev }; delete n[oKey]; return n; }); } }} style={{ padding: "7px 4px", background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 7, color: "#ef4444", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🗑️ Padam</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Takeaway/Delivery */}
-          {Object.values(activeOrders).filter(o => !o.tableId).length > 0 && (
+          {Object.values(activeOrders).filter(o => !o.tableId && !o.isDraft).length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 14, fontWeight: 700, color: "#64748b", marginBottom: 12, textTransform: "uppercase", letterSpacing: 1 }}>Takeaway / Delivery</div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 12 }}>
-                {Object.values(activeOrders).filter(o => !o.tableId).map(order => {
+                {Object.values(activeOrders).filter(o => !o.tableId && !o.isDraft).map(order => {
                   const oKey = order.orderKey || order.id;
                   const isMergeTarget = mergeMode && mergeSourceKey !== oKey;
                   const isMergeSource = mergeMode && mergeSourceKey === oKey;
@@ -1899,7 +2004,7 @@ export default function App() {
                         </button>
                       ) : (
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                          <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                          <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                           <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
                           <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                           <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
