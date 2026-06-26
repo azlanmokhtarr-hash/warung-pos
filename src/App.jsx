@@ -365,8 +365,12 @@ export default function App() {
   // Settings modals
   const [itemModal, setItemModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
-  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [] });
+  const [itemF, setItemF] = useState({ name: "", price: "", categoryId: "", subcategoryId: "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [], addons: [] });
   const [variantModal, setVariantModal] = useState(false);
+  const [addonModal, setAddonModal] = useState(false);
+  const [addonItem, setAddonItem] = useState(null);
+  const [addonVariantOpt, setAddonVariantOpt] = useState(null); // carry forward variant selection if both exist
+  const [selectedAddons, setSelectedAddons] = useState({}); // { addonId: true/false }
   const [variantItem, setVariantItem] = useState(null);
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [emojiPick, setEmojiPick] = useState(false);
@@ -744,32 +748,36 @@ export default function App() {
 
   // ── Cart ─────────────────────────────────────────────────────────────────
   function addCart(p, isCombo = false) {
-    // Kalau ada variants, tunjuk modal pilih varian dulu
     if (!isCombo && p.variants && p.variants.length > 0) {
-      setVariantItem(p);
-      setSelectedVariant(null);
-      setVariantModal(true);
+      setVariantItem(p); setSelectedVariant(null); setVariantModal(true);
+      return;
+    }
+    // Check add-ons
+    if (!isCombo && p.addons && p.addons.length > 0) {
+      setAddonItem(p); setAddonVariantOpt(null); setSelectedAddons({}); setAddonModal(true);
       return;
     }
     addCartDirect(p, isCombo);
   }
 
-  function addCartDirect(p, isCombo = false, variantOpt = null) {
+  function addCartDirect(p, isCombo = false, variantOpt = null, chosenAddons = []) {
     const variantSuffix = variantOpt ? `_${variantOpt.name}` : "";
-    const key = isCombo ? `combo_${p.id}` : `item_${p.id}${variantSuffix}`;
-    const finalPrice = variantOpt ? (p.price + (variantOpt.extraPrice || 0)) : p.price;
+    const addonSuffix = chosenAddons.length > 0 ? `_ao${chosenAddons.map(a => a.id).join("")}` : "";
+    const key = isCombo ? `combo_${p.id}_${Date.now()}` : `item_${p.id}${variantSuffix}${addonSuffix}_${Date.now()}`;
+    const basePrice = variantOpt ? (p.price + (variantOpt.extraPrice || 0)) : p.price;
+    const addonTotal = chosenAddons.reduce((s, a) => s + (a.price || 0), 0);
+    const finalPrice = basePrice + addonTotal;
     const finalName = variantOpt ? `${p.name} (${variantOpt.name})` : p.name;
     const buildExtras = (prod) => [
       ...(prod.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
-      ...(prod.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || [])
+      ...(prod.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, printerId: ci.printerId || "", isCustom: true })) || []),
+      ...chosenAddons.map(a => ({ customId: `ao_${a.id}`, name: `+ ${a.name}`, qty: 1, printerId: p.printerId || "", isCustom: true })),
     ];
     setCart(prev => {
-      const e = prev.find(i => i._key === key);
-      if (e) return prev.map(i => i._key === key ? { ...i, qty: i.qty + 1 } : i);
       if (isCombo) return [...prev, { _key: key, id: p.id, name: p.name, emoji: p.emoji, price: p.price, qty: 1, isCombo: true, printerId: p.printerId || "", comboItems: buildExtras(p) }];
       return [...prev, { _key: key, id: p.id, name: finalName, emoji: p.emoji, price: finalPrice, qty: 1, isCombo: false, printerId: p.printerId || "", comboItems: buildExtras(p) }];
     });
-    toast(`${p.emoji} ${finalName} ditambah`);
+    toast(`${p.emoji} ${finalName} ditambah${chosenAddons.length > 0 ? ` + ${chosenAddons.length} add-on` : ""}`);
   }
 
   function updQty(key, d) { setCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
@@ -854,8 +862,8 @@ export default function App() {
   }
 
   // ── Settings CRUD ────────────────────────────────────────────────────────
-  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [] }); setItemModal(true); };
-  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [], imageBase64: item.imageBase64 || "", items: item.items || [], customItems: item.customItems || [] }); setItemModal(true); };
+  const openAddItem = () => { setEditItem(null); setItemF({ name: "", price: "", categoryId: categories[0]?.id || "", subcategoryId: categories[0]?.subcategories[0]?.id || "", emoji: "🍚", printerId: "", variants: [], imageBase64: "", items: [], customItems: [], addons: [] }); setItemModal(true); };
+  const openEditItem = (item) => { setEditItem(item); setItemF({ name: item.name, price: item.price.toString(), categoryId: item.categoryId, subcategoryId: item.subcategoryId, emoji: item.emoji, printerId: item.printerId || "", variants: item.variants || [], imageBase64: item.imageBase64 || "", items: item.items || [], customItems: item.customItems || [], addons: item.addons || [] }); setItemModal(true); };
   const toggleSoldOut = (id) => {
     setProducts(p => p.map(i => i.id === id ? { ...i, soldOut: !i.soldOut } : i));
   };
@@ -1200,6 +1208,9 @@ export default function App() {
   const [qrCheckoutOpen, setQrCheckoutOpen] = useState(false); // checkout modal
   const [qrVariantItem, setQrVariantItem] = useState(null); // variant picker
   const [qrVariantSelected, setQrVariantSelected] = useState({});
+  const [qrAddonItem, setQrAddonItem] = useState(null);
+  const [qrAddonVariantOpt, setQrAddonVariantOpt] = useState(null);
+  const [qrSelectedAddons, setQrSelectedAddons] = useState({});
   const [qrMenuLoaded, setQrMenuLoaded] = useState(!isQROrderPage);
 
   // Load menu dari Firestore untuk QR page
@@ -1258,6 +1269,14 @@ export default function App() {
     };
 
     function qrAddItem(p, isCombo = false) {
+      if (!isCombo && p.variants && p.variants.length > 0) {
+        setQrVariantItem(p); setQrVariantSelected({});
+        return;
+      }
+      if (!isCombo && p.addons && p.addons.length > 0) {
+        setQrAddonItem(p); setQrAddonVariantOpt(null); setQrSelectedAddons({});
+        return;
+      }
       const key = isCombo ? `combo_${p.id}` : `item_${p.id}_`;
       const buildExtras = (prod) => [
         ...(prod.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
@@ -1352,6 +1371,11 @@ export default function App() {
                 <button onClick={() => {
                   const sel = qrVariantSelected[qrVariantItem.id];
                   if (!sel && qrVariantItem.variants?.length > 0) { alert("Sila pilih varian"); return; }
+                  if (qrVariantItem.addons && qrVariantItem.addons.length > 0) {
+                    setQrAddonItem(qrVariantItem); setQrAddonVariantOpt(sel || null); setQrSelectedAddons({});
+                    setQrVariantItem(null); setQrVariantSelected({});
+                    return;
+                  }
                   const price = sel ? qrVariantItem.price + (sel.extraPrice || 0) : qrVariantItem.price;
                   const key = `item_${qrVariantItem.id}_${sel?.name || ""}`;
                   setQrCart(prev => {
@@ -1365,6 +1389,59 @@ export default function App() {
                   setQrVariantItem(null);
                   setQrVariantSelected({});
                 }} style={{ flex: 2, padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, cursor: "pointer" }}>+ Tambah ke Cart</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* QR Add-On Modal */}
+        {qrAddonItem && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 20, padding: 24, width: "100%", maxWidth: 400 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 2 }}>{qrAddonItem.emoji} {qrAddonItem.name}{qrAddonVariantOpt ? ` (${qrAddonVariantOpt.name})` : ""}</div>
+              <div style={{ fontSize: 13, color: "#64748b", marginBottom: 16 }}>Tambah extra? (optional)</div>
+              {qrAddonItem.addons.map(a => {
+                const checked = !!qrSelectedAddons[a.id];
+                return (
+                  <button key={a.id} onClick={() => setQrSelectedAddons(s => ({ ...s, [a.id]: !s[a.id] }))}
+                    style={{ width: "100%", padding: "12px 16px", marginBottom: 8, border: `2px solid ${checked ? "#22c55e" : "#e2e8f0"}`, borderRadius: 10, background: checked ? "#f0fdf4" : "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${checked ? "#22c55e" : "#cbd5e1"}`, background: checked ? "#22c55e" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700 }}>{checked ? "✓" : ""}</div>
+                      <span style={{ fontWeight: 600, color: "#1e293b" }}>{a.name}</span>
+                    </div>
+                    <span style={{ color: "#22c55e", fontWeight: 700 }}>+{formatRM(a.price)}</span>
+                  </button>
+                );
+              })}
+              {Object.values(qrSelectedAddons).some(Boolean) && (
+                <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 12px", marginBottom: 8, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                  <span>Tambahan:</span>
+                  <span>+{formatRM(qrAddonItem.addons.filter(a => qrSelectedAddons[a.id]).reduce((s, a) => s + a.price, 0))}</span>
+                </div>
+              )}
+              <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+                <button onClick={() => { setQrAddonItem(null); setQrAddonVariantOpt(null); setQrSelectedAddons({}); }} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>Batal</button>
+                <button onClick={() => {
+                  const chosenAddons = qrAddonItem.addons.filter(a => qrSelectedAddons[a.id]);
+                  const basePrice = qrAddonVariantOpt ? qrAddonItem.price + (qrAddonVariantOpt.extraPrice || 0) : qrAddonItem.price;
+                  const addonTotal = chosenAddons.reduce((s, a) => s + a.price, 0);
+                  const finalPrice = basePrice + addonTotal;
+                  const key = `item_${qrAddonItem.id}_${qrAddonVariantOpt?.name || ""}_ao${chosenAddons.map(a => a.id).join("")}_${Date.now()}`;
+                  setQrCart(prev => [...prev, {
+                    _key: key, id: qrAddonItem.id, name: qrAddonItem.name, emoji: qrAddonItem.emoji,
+                    price: finalPrice, qty: 1, isCombo: false,
+                    variantLabel: qrAddonVariantOpt?.name || "",
+                    printerId: qrAddonItem.printerId || "",
+                    comboItems: [
+                      ...(qrAddonItem.items?.map(ci => { const x = products.find(z => z.id === ci.productId); return { productId: ci.productId, name: x?.name || "?", qty: ci.qty, printerId: ci.printerId || "" }; }) || []),
+                      ...(qrAddonItem.customItems?.map(ci => ({ customId: ci.customId, name: ci.name, qty: ci.qty, isCustom: true })) || []),
+                      ...chosenAddons.map(a => ({ customId: `ao_${a.id}`, name: `+ ${a.name}`, qty: 1, isCustom: true }))
+                    ]
+                  }]);
+                  setQrAddonItem(null); setQrAddonVariantOpt(null); setQrSelectedAddons({});
+                }} style={{ flex: 2, padding: 12, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+                  ✅ {Object.values(qrSelectedAddons).some(Boolean) ? "Tambah ke Cart" : "Terus tanpa Add-On"}
+                </button>
               </div>
             </div>
           </div>
@@ -1597,6 +1674,48 @@ export default function App() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── ADDON MODAL ── */}
+      {addonModal && addonItem && (
+        <div style={S.modal} onClick={() => { setAddonModal(false); setAddonItem(null); }}>
+          <div style={{ ...S.mbox, maxWidth: 380 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 18, marginBottom: 4, textAlign: "center" }}>{addonItem.emoji}</div>
+            <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 2, color: "#1e293b", textAlign: "center" }}>{addonItem.name}{addonVariantOpt ? ` (${addonVariantOpt.name})` : ""}</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14, textAlign: "center" }}>Pilih add-on (optional):</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+              {addonItem.addons.map(a => {
+                const checked = !!selectedAddons[a.id];
+                return (
+                  <button key={a.id} onClick={() => setSelectedAddons(s => ({ ...s, [a.id]: !s[a.id] }))}
+                    style={{ padding: "12px 16px", background: checked ? "#f0fdf4" : "#f8fafc", border: `2px solid ${checked ? "#22c55e" : "#e2e8f0"}`, borderRadius: 10, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${checked ? "#22c55e" : "#cbd5e1"}`, background: checked ? "#22c55e" : "#fff", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 12, fontWeight: 700 }}>{checked ? "✓" : ""}</div>
+                      <span style={{ fontWeight: 600, color: "#1e293b", fontSize: 14 }}>{a.name}</span>
+                    </div>
+                    <span style={{ color: "#22c55e", fontWeight: 700, fontSize: 14 }}>+{formatRM(a.price)}</span>
+                  </button>
+                );
+              })}
+            </div>
+            {Object.values(selectedAddons).some(Boolean) && (
+              <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "8px 12px", marginBottom: 12, display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, color: "#166534" }}>
+                <span>Tambahan:</span>
+                <span>+{formatRM(addonItem.addons.filter(a => selectedAddons[a.id]).reduce((s, a) => s + a.price, 0))}</span>
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => { setAddonModal(false); setAddonItem(null); }} style={{ flex: 1, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={() => {
+                const chosen = addonItem.addons.filter(a => selectedAddons[a.id]);
+                addCartDirect(addonItem, false, addonVariantOpt, chosen);
+                setAddonModal(false); setAddonItem(null); setAddonVariantOpt(null); setSelectedAddons({});
+              }} style={{ flex: 2, padding: 10, background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                ✅ {Object.values(selectedAddons).some(Boolean) ? "Tambah ke Cart" : "Terus tanpa Add-On"}
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2540,6 +2659,23 @@ export default function App() {
               </div>
             </div>
             <div style={{ marginBottom: 12 }}>
+              <label style={S.lbl}>🍟 Add-On (optional) — pilihan tambahan yang customer/cashier boleh pilih masa order, ada caj tambahan</label>
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8, padding: 10, marginBottom: 8 }}>
+                {(itemF.addons || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Tiada add-on</div>}
+                {(itemF.addons || []).map((a, idx) => (
+                  <div key={idx} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
+                    <input value={a.name} onChange={e => setItemF(f => ({ ...f, addons: f.addons.map((x, i) => i === idx ? { ...x, name: e.target.value } : x) }))} placeholder="Nama add-on (cth: Extra Nasi)" style={{ ...S.inp, flex: 2, marginBottom: 0, fontSize: 12, padding: "7px 10px" }} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ fontSize: 11, color: "#64748b" }}>+RM</span>
+                      <input type="number" min="0" step="0.50" value={a.price} onChange={e => setItemF(f => ({ ...f, addons: f.addons.map((x, i) => i === idx ? { ...x, price: parseFloat(e.target.value) || 0 } : x) }))} style={{ ...S.inp, width: 70, marginBottom: 0, fontSize: 12, padding: "7px 8px" }} />
+                    </div>
+                    <button onClick={() => setItemF(f => ({ ...f, addons: f.addons.filter((_, i) => i !== idx) }))} style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 16 }}>✕</button>
+                  </div>
+                ))}
+                <button onClick={() => setItemF(f => ({ ...f, addons: [...(f.addons || []), { id: `ao_${Date.now()}`, name: "", price: 0 }] }))} style={{ padding: "5px 12px", background: "#f0fdf4", border: "1px dashed #22c55e", borderRadius: 6, fontSize: 12, cursor: "pointer", color: "#166534", fontWeight: 600, marginTop: 4 }}>+ Tambah Add-On</button>
+              </div>
+            </div>
+            <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>🎁 Item Tambahan (optional) — sentiasa sertakan sekali bila item ni di-order (cth: air free dalam set)</label>
               <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 10, marginBottom: 8, maxHeight: 180, overflowY: "auto" }}>
                 {(itemF.items || []).length === 0 && (itemF.customItems || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Tiada item tambahan</div>}
@@ -2650,7 +2786,15 @@ export default function App() {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               <button onClick={() => setVariantModal(false)} style={{ flex: 1, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
-              <button onClick={() => { if (!selectedVariant) return; addCartDirect(variantItem, false, selectedVariant); setVariantModal(false); setVariantItem(null); }}
+              <button onClick={() => {
+                if (!selectedVariant) return;
+                if (variantItem.addons && variantItem.addons.length > 0) {
+                  setAddonItem(variantItem); setAddonVariantOpt(selectedVariant); setSelectedAddons({});
+                  setVariantModal(false); setVariantItem(null); setAddonModal(true);
+                } else {
+                  addCartDirect(variantItem, false, selectedVariant); setVariantModal(false); setVariantItem(null);
+                }
+              }}
                 disabled={!selectedVariant}
                 style={{ flex: 2, padding: 10, background: selectedVariant ? "#3b82f6" : "#e2e8f0", border: "none", borderRadius: 8, color: selectedVariant ? "#fff" : "#94a3b8", fontWeight: 700, cursor: selectedVariant ? "pointer" : "not-allowed", fontSize: 14 }}>
                 ✅ Tambah ke Cart
