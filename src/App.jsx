@@ -480,8 +480,9 @@ export default function App() {
   useEffect(() => {
     if (!pendingAlert) return;
     if (alertCountdown <= 0) {
-      acceptPendingOrder(pendingAlert);
+      const toAccept = pendingAlert;
       setPendingAlert(null);
+      acceptPendingOrder(toAccept);
       return;
     }
     const t = setTimeout(() => setAlertCountdown(c => c - 1), 1000);
@@ -1093,12 +1094,14 @@ export default function App() {
       displayName: `${pending.tableNo} (Order #${num})`,
       customerName: pending.customerName,
       customerPhone: pending.customerPhone,
+      orderNote: pending.orderNote || "",
       time: new Date(),
       status: "active",
     };
     setOrderNum(n => n + 1);
     setActiveOrders(prev => ({ ...prev, [`order_${num}`]: order }));
     await updateDoc(doc(db, "pendingOrders", pending._docId), { status: "accepted" });
+    setQrOrderHistory(h => [{ ...pending, status: "accepted", acceptedAt: new Date().toISOString() }, ...h.slice(0, 99)]);
     setSendingOrder(true);
     await printOrderSlips(order);
     setSendingOrder(false);
@@ -1106,6 +1109,7 @@ export default function App() {
   }
   async function rejectPendingOrder(pending) {
     await updateDoc(doc(db, "pendingOrders", pending._docId), { status: "rejected" });
+    setQrOrderHistory(h => [{ ...pending, status: "rejected", rejectedAt: new Date().toISOString() }, ...h.slice(0, 99)]);
     toast("❌ Order ditolak", "#ef4444");
   }
   function clearDonePendingOrders() {
@@ -1196,6 +1200,13 @@ export default function App() {
   const [qrName, setQrName] = useState("");
   const [qrPhone, setQrPhone] = useState("");
   const [qrNote, setQrNote] = useState("");
+  const [qrItemNoteModal, setQrItemNoteModal] = useState(false);
+  const [qrItemNoteKey, setQrItemNoteKey] = useState(null);
+  const [qrItemNoteText, setQrItemNoteText] = useState("");
+  const [qrOrderHistory, setQrOrderHistory] = useLocalStorage("pos_qr_history", []);
+  const [showQrHistory, setShowQrHistory] = useState(false);
+  const [showReprintModal, setShowReprintModal] = useState(false);
+  const [reprintOrder, setReprintOrder] = useState(null);
   const [qrSubmitted, setQrSubmitted] = useState(false);
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
@@ -1385,6 +1396,20 @@ export default function App() {
           </div>
         )}
 
+        {/* QR Item Note Modal */}
+        {qrItemNoteModal && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 380 }}>
+              <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>📝 Nota untuk Item</div>
+              <textarea value={qrItemNoteText} onChange={e => setQrItemNoteText(e.target.value)} placeholder="cth: Taknak bawang, pedas sikit..." rows={3} style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", fontSize: 14, resize: "none", boxSizing: "border-box", marginBottom: 12 }} />
+              <div style={{ display: "flex", gap: 8 }}>
+                <button onClick={() => { setQrCart(c => c.map(i => i._key === qrItemNoteKey ? { ...i, note: "" } : i)); setQrItemNoteModal(false); }} style={{ flex: 1, padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>🗑️ Clear</button>
+                <button onClick={() => { setQrCart(c => c.map(i => i._key === qrItemNoteKey ? { ...i, note: qrItemNoteText.trim() } : i)); setQrItemNoteModal(false); }} style={{ flex: 2, padding: 10, background: "#f59e0b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>✅ Simpan</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* QR Add-On Modal */}
         {qrAddonItem && (
           <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -1503,10 +1528,15 @@ export default function App() {
                     {cartQty > 0 ? `${cartQty} dipilih ✓` : "+ Pilih Varian"}
                   </button>
                 ) : cartItem ? (
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
-                    <button onClick={() => qrUpdQty(cartItem._key, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
-                    <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{cartItem.qty}</span>
-                    <button onClick={() => qrAddItem(p, isCombo)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>+</button>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 4 }}>
+                      <button onClick={() => qrUpdQty(cartItem._key, -1)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#fef2f2", color: "#ef4444", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>−</button>
+                      <span style={{ fontSize: 15, fontWeight: 700, minWidth: 20, textAlign: "center" }}>{cartItem.qty}</span>
+                      <button onClick={() => qrAddItem(p, isCombo)} style={{ width: 28, height: 28, borderRadius: 8, border: "1px solid #e2e8f0", background: "#f0fdf4", color: "#22c55e", cursor: "pointer", fontSize: 16, fontWeight: 700 }}>+</button>
+                    </div>
+                    <button onClick={() => { setQrItemNoteKey(cartItem._key); setQrItemNoteText(cartItem.note || ""); setQrItemNoteModal(true); }} style={{ width: "100%", padding: "4px 0", background: cartItem.note ? "#fff7ed" : "#f8fafc", border: `1px solid ${cartItem.note ? "#f59e0b" : "#e2e8f0"}`, borderRadius: 6, color: cartItem.note ? "#f59e0b" : "#94a3b8", fontSize: 10, cursor: "pointer" }}>
+                      {cartItem.note ? `📝 ${cartItem.note}` : "+ Nota"}
+                    </button>
                   </div>
                 ) : (
                   <button onClick={() => qrAddItem(p, isCombo)} style={{ width: "100%", padding: "7px 0", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>+ Tambah</button>
@@ -1746,6 +1776,50 @@ export default function App() {
         </div>
       )}
 
+      {/* ── QR ORDER HISTORY MODAL ── */}
+      {showQrHistory && (
+        <div style={S.modal} onClick={() => setShowQrHistory(false)}>
+          <div style={{ ...S.mbox, maxWidth: 520, maxHeight: "80vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div style={{ fontSize: 18, fontWeight: 700 }}>📜 QR Order History</div>
+              <button onClick={() => setShowQrHistory(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            {qrOrderHistory.length === 0 && <div style={{ color: "#94a3b8", fontSize: 13 }}>Tiada history lagi.</div>}
+            {qrOrderHistory.map((o, i) => (
+              <div key={i} style={{ background: o.status === "accepted" ? "#f0fdf4" : "#fef2f2", border: `1px solid ${o.status === "accepted" ? "#22c55e" : "#ef4444"}`, borderRadius: 10, padding: 12, marginBottom: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13 }}>📍 {o.tableNo} · 👤 {o.customerName}</div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: o.status === "accepted" ? "#166534" : "#dc2626", background: o.status === "accepted" ? "#dcfce7" : "#fee2e2", borderRadius: 6, padding: "2px 8px" }}>{o.status === "accepted" ? "✅ Diterima" : "❌ Ditolak"}</span>
+                </div>
+                <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6 }}>📞 {o.customerPhone} · {o.acceptedAt || o.rejectedAt ? new Date(o.acceptedAt || o.rejectedAt).toLocaleString("ms-MY") : ""}</div>
+                <div style={{ fontSize: 12, marginBottom: 8 }}>{o.cart?.map((ci, j) => <div key={j}>• {ci.name} ×{ci.qty} — {formatRM(ci.price * ci.qty)}</div>)}</div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>Jumlah: {formatRM(o.total)}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={async () => { await acceptPendingOrder(o); toast("✅ Order diproses semula!", "#4ade80"); }} style={{ flex: 1, padding: "7px 0", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>▶ Accept & Print</button>
+                  <button onClick={() => setQrOrderHistory(h => h.filter((_, j) => j !== i))} style={{ padding: "7px 12px", background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 7, color: "#ef4444", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>🗑️</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ── REPRINT MODAL ── */}
+      {showReprintModal && reprintOrder && (
+        <div style={S.modal} onClick={() => setShowReprintModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>🖨️ Reprint</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Order #{reprintOrder.num} — {reprintOrder.tableNo}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <button onClick={async () => { await printOrderSlips(reprintOrder); setShowReprintModal(false); toast("✅ Slip dapur diprint!", "#4ade80"); }} style={{ padding: 14, background: "#f59e0b", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>🍳 Print Slip Dapur</button>
+              <button onClick={async () => { await printReceipt({ ...reprintOrder, method: reprintOrder.method || "cash", cash: reprintOrder.cash || 0, change: reprintOrder.change || 0 }); setShowReprintModal(false); toast("✅ Resit diprint!", "#4ade80"); }} style={{ padding: 14, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>🧾 Print Resit</button>
+              <button onClick={async () => { await printOrderSlips(reprintOrder); await printReceipt({ ...reprintOrder, method: reprintOrder.method || "cash", cash: reprintOrder.cash || 0, change: reprintOrder.change || 0 }); setShowReprintModal(false); toast("✅ Semua diprint!", "#4ade80"); }} style={{ padding: 14, background: "#475569", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>🖨️ Print Semua</button>
+              <button onClick={() => setShowReprintModal(false)} style={{ padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MOVE TABLE MODAL (Pindah Meja) ── */}
       {moveTableModal && (
         <div style={S.modal} onClick={() => { setMoveTableModal(false); setMoveSourceKey(null); }}>
@@ -1867,6 +1941,7 @@ export default function App() {
             📱 QR Order
             {newPendingCount > 0 && <span style={{ position: "absolute", top: -6, right: -6, background: "#ef4444", color: "#fff", borderRadius: "50%", width: 16, height: 16, fontSize: 9, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{newPendingCount}</span>}
           </button>
+          <button onClick={() => setShowQrHistory(true)} style={{ padding: "6px 12px", background: "#475569", border: "1px solid #475569", borderRadius: 6, color: "#fff", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>📜 QR History</button>
         </div>
       </div>
 
@@ -2044,6 +2119,7 @@ export default function App() {
                           <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e" }}>{order.displayName || order.tableNo}</div>
                           <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
                         </div>
+                        {order.customerName && <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone}</div>}
                         <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>{order.cart.length} item · {fmtTime(order.time)} · {order.orderType}</div>
                         <div style={{ fontSize: 18, fontWeight: 700, color: "#f59e0b", marginBottom: 10 }}>{formatRM(order.total)}</div>
                         {mergeMode ? (
@@ -2058,6 +2134,7 @@ export default function App() {
                             <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                             <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
                             <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
+                            <button onClick={() => { setReprintOrder(order); setShowReprintModal(true); }} style={{ padding: "7px 4px", background: "#475569", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🖨️ Reprint</button>
                           </div>
                         )}
                       </div>
@@ -2123,6 +2200,7 @@ export default function App() {
                           <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                           <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
                           <button onClick={() => openSplit(oKey)} style={{ padding: "7px 4px", background: "#f59e0b", border: "none", borderRadius: 7, color: "#000", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✂️ Split</button>
+                          <button onClick={() => { setReprintOrder(order); setShowReprintModal(true); }} style={{ padding: "7px 4px", background: "#475569", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🖨️ Reprint</button>
                         </div>
                       )}
                     </div>
