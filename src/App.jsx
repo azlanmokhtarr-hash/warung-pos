@@ -592,6 +592,7 @@ export default function App() {
     setShiftModal(false);
     setShiftF({ name: "", float: "" });
     toast(`✅ Shift "${shift.name}" dibuka`, "#22c55e");
+    setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables, shiftOpen: true }).catch(() => {});
   }
 
   function closeShift() {
@@ -611,6 +612,7 @@ export default function App() {
     setCloseShiftModal(false);
     setCloseF({ actualCash: "" });
     toast(`✅ Shift "${closed.name}" ditutup`, "#22c55e");
+    setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables, shiftOpen: false }).catch(() => {});
     // Auto print report
     printShiftReport(closed, true);
   }
@@ -1177,7 +1179,7 @@ export default function App() {
     if (isFirstRender.current) { isFirstRender.current = false; return; } // skip first render
     const syncMenu = async () => {
       try {
-        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
+        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables, shiftOpen: !!currentShift });
       } catch (e) { console.error("Firestore sync error:", e); }
     };
     const timer = setTimeout(syncMenu, 2000);
@@ -1193,6 +1195,7 @@ export default function App() {
   const [qrCart, setQrCart] = useState([]);
   const [qrName, setQrName] = useState("");
   const [qrPhone, setQrPhone] = useState("");
+  const [qrNote, setQrNote] = useState("");
   const [qrSubmitted, setQrSubmitted] = useState(false);
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
@@ -1219,6 +1222,7 @@ export default function App() {
         if (typeof data.taxRate === "number") {
           setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
         }
+        if (typeof data.shiftOpen === "boolean") setQrShiftOpen(data.shiftOpen);
       }
       setQrMenuLoaded(true);
     }).catch(() => setQrMenuLoaded(true));
@@ -1228,6 +1232,15 @@ export default function App() {
     if (!qrMenuLoaded) return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div><div style={{ fontSize: 14, color: "#64748b" }}>Memuatkan menu...</div></div>
+      </div>
+    );
+    if (!qrShiftOpen) return (
+      <div style={{ minHeight: "100vh", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ textAlign: "center", color: "#fff" }}>
+          <div style={{ fontSize: 64, marginBottom: 16 }}>🌙</div>
+          <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Kedai Sedang Tutup</div>
+          <div style={{ fontSize: 14, color: "#94a3b8" }}>Terima kasih! Sila datang semula apabila kedai dibuka.</div>
+        </div>
       </div>
     );
     const qrFiltered = products.filter(p =>
@@ -1278,6 +1291,7 @@ export default function App() {
         tableNo: qrTableName,
         customerName: qrName.trim(),
         customerPhone: qrPhone.trim(),
+        orderNote: qrNote.trim(),
         cart: qrCart,
         subtotal: qrSub,
         tax: qrTax,
@@ -1289,6 +1303,7 @@ export default function App() {
       try {
         await addDoc(collection(db, "pendingOrders"), pending);
         setQrSubmitted(true);
+        setQrNote("");
       } catch (e) {
         alert("Gagal hantar order. Pastikan ada internet.");
       }
@@ -1445,6 +1460,10 @@ export default function App() {
               <div style={{ marginBottom: 20 }}>
                 <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 5 }}>No. Telefon * <span style={{ fontWeight: 400, color: "#94a3b8" }}>(contoh: 0123456789)</span></label>
                 <input value={qrPhone} onChange={e => setQrPhone(e.target.value)} placeholder="01xxxxxxxx" type="tel" style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+              </div>
+              <div style={{ marginBottom: 20 }}>
+                <label style={{ fontSize: 12, fontWeight: 700, color: "#374151", display: "block", marginBottom: 5 }}>📝 Notes <span style={{ fontWeight: 400, color: "#94a3b8" }}>(optional — cth: allergi, permintaan khas)</span></label>
+                <textarea value={qrNote} onChange={e => setQrNote(e.target.value)} placeholder="Tulis nota untuk order ni..." rows={3} style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "11px 14px", fontSize: 14, outline: "none", boxSizing: "border-box", resize: "none" }} />
               </div>
               <div style={{ display: "flex", gap: 10 }}>
                 <button onClick={() => setQrCheckoutOpen(false)} style={{ flex: 1, padding: 14, background: "#f1f5f9", border: "none", borderRadius: 10, fontWeight: 600, cursor: "pointer" }}>← Balik</button>
@@ -2303,7 +2322,7 @@ export default function App() {
                     <button onClick={() => setImportModal(true)} style={{ padding: "8px 16px", background: "#6366f1", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📥 Import</button>
                     <button onClick={async () => {
                       try {
-                        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
+                        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables, shiftOpen: !!currentShift });
                         toast("✅ Menu berjaya sync ke QR!", "#22c55e");
                       } catch { toast("❌ Sync gagal — check internet", "#ef4444"); }
                     }} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>🔄 Sync QR</button>
@@ -3296,6 +3315,7 @@ export default function App() {
               <div style={{ fontSize: 48, marginBottom: 8 }}>🔔</div>
               <div style={{ fontSize: 20, fontWeight: 700, color: "#1e293b" }}>Order Baru Masuk!</div>
               <div style={{ fontSize: 14, color: "#64748b", marginTop: 4 }}>dari <b>{pendingAlert.customerName}</b> · 📞 {pendingAlert.customerPhone}</div>
+              {pendingAlert.orderNote && <div style={{ fontSize: 13, color: "#f59e0b", marginTop: 4, background: "#fff7ed", borderRadius: 8, padding: "4px 10px" }}>📝 {pendingAlert.orderNote}</div>}
               <div style={{ fontSize: 13, color: "#f59e0b", fontWeight: 700, marginTop: 2 }}>📍 {pendingAlert.tableNo}</div>
             </div>
             <div style={{ background: "#f8fafc", borderRadius: 12, padding: 12, marginBottom: 16 }}>
@@ -3343,6 +3363,7 @@ export default function App() {
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                         <div>
                           <div style={{ fontWeight: 700, fontSize: 14, color: "#92400e" }}>👤 {o.customerName} · 📞 {o.customerPhone}</div>
+                          {o.orderNote && <div style={{ fontSize: 12, color: "#f59e0b", marginTop: 2 }}>📝 {o.orderNote}</div>}
                           <div style={{ fontSize: 12, color: "#92400e" }}>📍 {o.tableNo} · {fmtTime(o.time)}</div>
                         </div>
                         <div style={{ fontWeight: 700, fontSize: 16, color: "#f59e0b" }}>{formatRM(o.total)}</div>
