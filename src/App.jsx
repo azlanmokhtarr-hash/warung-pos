@@ -1179,14 +1179,8 @@ export default function App() {
     if (isQROrderPage) return; // QR page tak perlu push
     const syncMenu = async () => {
       try {
-        await updateDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
-      } catch {
-        // Doc mungkin belum wujud, cuba addDoc
-        try {
-          const { setDoc } = await import("firebase/firestore");
-          await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
-        } catch {}
-      }
+        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
+      } catch (e) { console.error("Firestore sync error:", e); }
     };
     const timer = setTimeout(syncMenu, 2000); // debounce 2s
     return () => clearTimeout(timer);
