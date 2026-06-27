@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { initializeApp } from "firebase/app";
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setDoc, getDoc, query, orderBy } from "firebase/firestore";
 
@@ -1175,7 +1175,7 @@ export default function App() {
   };
 
   // Sync menu ke Firestore bila products berubah (untuk QR order page)
-  const isFirstRender = React.useRef(true);
+  const isFirstRender = useRef(true);
   useEffect(() => {
     if (isQROrderPage) return;
     if (isFirstRender.current) { isFirstRender.current = false; return; } // skip first render
