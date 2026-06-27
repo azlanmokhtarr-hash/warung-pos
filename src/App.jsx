@@ -592,8 +592,6 @@ export default function App() {
     setShiftModal(false);
     setShiftF({ name: "", float: "" });
     toast(`✅ Shift "${shift.name}" dibuka`, "#22c55e");
-    // Sync ke Firestore supaya QR page tahu kedai buka
-    setDoc(doc(db, "config", "shiftStatus"), { open: true, shiftName: shift.name, openTime: shift.openTime }).catch(() => {});
   }
 
   function closeShift() {
@@ -613,8 +611,6 @@ export default function App() {
     setCloseShiftModal(false);
     setCloseF({ actualCash: "" });
     toast(`✅ Shift "${closed.name}" ditutup`, "#22c55e");
-    // Sync ke Firestore — kedai tutup
-    setDoc(doc(db, "config", "shiftStatus"), { open: false }).catch(() => {});
     // Auto print report
     printShiftReport(closed, true);
   }
@@ -1226,29 +1222,12 @@ export default function App() {
       }
       setQrMenuLoaded(true);
     }).catch(() => setQrMenuLoaded(true));
-    // Check shift status
-    getDoc(doc(db, "config", "shiftStatus")).then(snap => {
-      if (snap.exists()) {
-        setQrShiftOpen(snap.data().open === true); // hanya buka kalau explicitly true
-      } else {
-        setQrShiftOpen(true); // doc tak wujud lagi = belum setup shift system, bagi proceed
-      }
-    }).catch(() => setQrShiftOpen(true)); // network error = bagi proceed
   }, []);
 
   if (isQROrderPage) {
     if (!qrMenuLoaded) return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <div style={{ textAlign: "center" }}><div style={{ fontSize: 40, marginBottom: 12 }}>⏳</div><div style={{ fontSize: 14, color: "#64748b" }}>Memuatkan menu...</div></div>
-      </div>
-    );
-    if (!qrShiftOpen) return (
-      <div style={{ minHeight: "100vh", background: "#1e293b", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
-        <div style={{ textAlign: "center", color: "#fff" }}>
-          <div style={{ fontSize: 64, marginBottom: 16 }}>🌙</div>
-          <div style={{ fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Kedai Sedang Tutup</div>
-          <div style={{ fontSize: 14, color: "#94a3b8" }}>Terima kasih kerana berkunjung! Sila datang semula apabila kedai dibuka.</div>
-        </div>
       </div>
     );
     const qrFiltered = products.filter(p =>
@@ -1290,7 +1269,6 @@ export default function App() {
     function qrUpdQty(key, d) { setQrCart(prev => prev.map(i => i._key === key ? { ...i, qty: i.qty + d } : i).filter(i => i.qty > 0)); }
 
     async function qrSubmitOrder() {
-      if (!qrShiftOpen) return alert("Maaf, kedai sedang tutup. Sila order semula apabila kedai dibuka.");
       if (!qrName.trim()) return alert("Sila masukkan nama anda");
       if (!validatePhone(qrPhone)) return alert("No. telefon tidak sah. Mesti bermula dengan 01 (contoh: 0123456789)");
       if (qrCart.length === 0) return alert("Sila pilih sekurang-kurangnya 1 item");
