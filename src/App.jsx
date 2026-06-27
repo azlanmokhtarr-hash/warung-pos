@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { initializeApp } from "firebase/app";
-import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, orderBy } from "firebase/firestore";
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, setDoc, getDoc, query, orderBy } from "firebase/firestore";
 
 // ─── Firebase Config ─────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -593,7 +593,7 @@ export default function App() {
     setShiftF({ name: "", float: "" });
     toast(`✅ Shift "${shift.name}" dibuka`, "#22c55e");
     // Sync ke Firestore supaya QR page tahu kedai buka
-    import("firebase/firestore").then(({ setDoc }) => { setDoc(doc(db, "config", "shiftStatus"), { open: true, shiftName: shift.name, openTime: shift.openTime }).catch(() => {}); });
+    setDoc(doc(db, "config", "shiftStatus"), { open: true, shiftName: shift.name, openTime: shift.openTime }).catch(() => {});
   }
 
   function closeShift() {
@@ -614,7 +614,7 @@ export default function App() {
     setCloseF({ actualCash: "" });
     toast(`✅ Shift "${closed.name}" ditutup`, "#22c55e");
     // Sync ke Firestore — kedai tutup
-    import("firebase/firestore").then(({ setDoc }) => { setDoc(doc(db, "config", "shiftStatus"), { open: false }).catch(() => {}); });
+    setDoc(doc(db, "config", "shiftStatus"), { open: false }).catch(() => {});
     // Auto print report
     printShiftReport(closed, true);
   }
@@ -1217,25 +1217,23 @@ export default function App() {
   const [qrShiftOpen, setQrShiftOpen] = useState(false); // block until Firestore confirms open
   useEffect(() => {
     if (!isQROrderPage) return;
-    import("firebase/firestore").then(({ getDoc }) => {
-      getDoc(doc(db, "config", "menu")).then(snap => {
-        if (snap.exists()) {
-          const data = snap.data();
-          if (data.products) setProducts(data.products);
-          if (data.combos) setCombos(data.combos);
-          if (data.categories) setCategories(data.categories);
-          if (data.tables) setTables(data.tables);
-          if (typeof data.taxRate === "number") {
-            setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
-          }
+    getDoc(doc(db, "config", "menu")).then(snap => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.products) setProducts(data.products);
+        if (data.combos) setCombos(data.combos);
+        if (data.categories) setCategories(data.categories);
+        if (data.tables) setTables(data.tables);
+        if (typeof data.taxRate === "number") {
+          setTaxConfig(data.taxRate > 0 ? { enabled: true, rate: Math.round(data.taxRate * 100), label: "SST" } : { enabled: false, rate: 6, label: "SST" });
         }
-        setQrMenuLoaded(true);
-      }).catch(() => setQrMenuLoaded(true));
-      // Check shift status
-      getDoc(doc(db, "config", "shiftStatus")).then(snap => {
-        if (snap.exists()) setQrShiftOpen(snap.data().open !== false);
-      }).catch(() => {});
-    });
+      }
+      setQrMenuLoaded(true);
+    }).catch(() => setQrMenuLoaded(true));
+    // Check shift status
+    getDoc(doc(db, "config", "shiftStatus")).then(snap => {
+      if (snap.exists()) setQrShiftOpen(snap.data().open !== false);
+    }).catch(() => setQrShiftOpen(true)); // kalau fail baca, bagi proceed je
   }, []);
 
   if (isQROrderPage) {
