@@ -1175,14 +1175,16 @@ export default function App() {
   };
 
   // Sync menu ke Firestore bila products berubah (untuk QR order page)
+  const isFirstRender = React.useRef(true);
   useEffect(() => {
-    if (isQROrderPage) return; // QR page tak perlu push
+    if (isQROrderPage) return;
+    if (isFirstRender.current) { isFirstRender.current = false; return; } // skip first render
     const syncMenu = async () => {
       try {
         await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
       } catch (e) { console.error("Firestore sync error:", e); }
     };
-    const timer = setTimeout(syncMenu, 2000); // debounce 2s
+    const timer = setTimeout(syncMenu, 2000);
     return () => clearTimeout(timer);
   }, [products, combos, categories, taxRate, taxConfig, tables]);
   // ════════════════════════════════════════════════════════════════════════
@@ -1226,8 +1228,12 @@ export default function App() {
     }).catch(() => setQrMenuLoaded(true));
     // Check shift status
     getDoc(doc(db, "config", "shiftStatus")).then(snap => {
-      if (snap.exists()) setQrShiftOpen(snap.data().open !== false);
-    }).catch(() => setQrShiftOpen(true)); // kalau fail baca, bagi proceed je
+      if (snap.exists()) {
+        setQrShiftOpen(snap.data().open === true); // hanya buka kalau explicitly true
+      } else {
+        setQrShiftOpen(true); // doc tak wujud lagi = belum setup shift system, bagi proceed
+      }
+    }).catch(() => setQrShiftOpen(true)); // network error = bagi proceed
   }, []);
 
   if (isQROrderPage) {
@@ -2317,6 +2323,12 @@ export default function App() {
                     <button onClick={openAddCombo} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#000", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Set</button>
                     <button onClick={exportMenuCSV} style={{ padding: "8px 16px", background: "#10b981", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📤 Export</button>
                     <button onClick={() => setImportModal(true)} style={{ padding: "8px 16px", background: "#6366f1", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📥 Import</button>
+                    <button onClick={async () => {
+                      try {
+                        await setDoc(doc(db, "config", "menu"), { products, combos, categories, taxRate, taxConfig, tables });
+                        toast("✅ Menu berjaya sync ke QR!", "#22c55e");
+                      } catch { toast("❌ Sync gagal — check internet", "#ef4444"); }
+                    }} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>🔄 Sync QR</button>
                   </div>
                 </div>
                 <div style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 10 }}>Item Menu ({products.length})</div>
