@@ -454,6 +454,8 @@ export default function App() {
   const [pendingAlert, setPendingAlert] = useState(null); // { order, countdown }
   const [alertCountdown, setAlertCountdown] = useState(0);
 
+  const processingAccept = useRef(false);
+
   // Realtime listener dari Firestore
   useEffect(() => {
     const q = query(collection(db, "pendingOrders"), orderBy("time", "desc"));
@@ -462,7 +464,6 @@ export default function App() {
       setPendingOrders(orders);
       const newOnes = orders.filter(o => o.status === "pending");
       setNewPendingCount(newOnes.length);
-      // Show alert for latest pending order if not already alerting
       if (newOnes.length > 0) {
         setPendingAlert(prev => {
           if (!prev || prev._docId !== newOnes[0]._docId) {
@@ -472,7 +473,8 @@ export default function App() {
           return prev;
         });
       } else {
-        setPendingAlert(null);
+        // Jangan clear kalau tengah proses auto-accept
+        if (!processingAccept.current) setPendingAlert(null);
       }
     });
     return () => unsub();
@@ -1087,6 +1089,8 @@ export default function App() {
 
   // ── Pending QR Orders ────────────────────────────────────────────────────
   async function acceptPendingOrder(pending) {
+    processingAccept.current = true;
+    try {
     const num = orderNum;
     const order = {
       id: `order_${Date.now()}`,
@@ -1114,6 +1118,7 @@ export default function App() {
     await printOrderSlips(order);
     setSendingOrder(false);
     toast(`✅ Order #${num} dari ${pending.customerName} diterima!`, "#4ade80");
+    } finally { processingAccept.current = false; }
   }
   async function rejectPendingOrder(pending) {
     await updateDoc(doc(db, "pendingOrders", pending._docId), { status: "rejected" });
@@ -1215,6 +1220,7 @@ export default function App() {
   const [showQrHistory, setShowQrHistory] = useState(false);
   const [showReprintModal, setShowReprintModal] = useState(false);
   const [reprintOrder, setReprintOrder] = useState(null);
+  const [orderPreview, setOrderPreview] = useState(null);
   const [qrSubmitted, setQrSubmitted] = useState(false);
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
@@ -1406,7 +1412,7 @@ export default function App() {
 
         {/* QR Item Note Modal */}
         {qrItemNoteModal && (
-          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.6)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
             <div style={{ background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 380 }}>
               <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 12 }}>📝 Nota untuk Item</div>
               <textarea value={qrItemNoteText} onChange={e => setQrItemNoteText(e.target.value)} placeholder="cth: Taknak bawang, pedas sikit..." rows={3} style={{ width: "100%", border: "1.5px solid #e2e8f0", borderRadius: 10, padding: "10px 12px", fontSize: 14, resize: "none", boxSizing: "border-box", marginBottom: 12 }} />
@@ -1788,6 +1794,43 @@ export default function App() {
         </div>
       )}
 
+      {/* ── ORDER PREVIEW MODAL ── */}
+      {orderPreview && (
+        <div style={S.modal} onClick={() => setOrderPreview(null)}>
+          <div style={{ ...S.mbox, maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <div style={{ fontSize: 16, fontWeight: 700 }}>{orderPreview.displayName || orderPreview.tableNo} — Order #{orderPreview.num}</div>
+              <button onClick={() => setOrderPreview(null)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            {orderPreview.customerName && <div style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>👤 {orderPreview.customerName} · 📞 {orderPreview.customerPhone}</div>}
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 12, marginBottom: 14 }}>
+              {orderPreview.cart.map((i, idx) => (
+                <div key={idx}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3 }}>
+                    <span>{i.emoji} {i.name} ×{i.qty}</span>
+                    <span style={{ fontWeight: 700 }}>{formatRM(i.price * i.qty)}</span>
+                  </div>
+                  {i.note && <div style={{ fontSize: 11, color: "#f59e0b", paddingLeft: 16, marginBottom: 3 }}>📝 {i.note}</div>}
+                  {i.comboItems?.length > 0 && i.comboItems.map(ci => <div key={ci.customId || ci.productId} style={{ fontSize: 11, color: "#94a3b8", paddingLeft: 16 }}>· {ci.name} ×{ci.qty}</div>)}
+                </div>
+              ))}
+              <div style={{ borderTop: "1px dashed #e2e8f0", marginTop: 8, paddingTop: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b" }}><span>Subtotal</span><span>{formatRM(orderPreview.subtotal)}</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, marginTop: 4 }}><span>JUMLAH</span><span style={{ color: "#f59e0b" }}>{formatRM(orderPreview.total)}</span></div>
+              </div>
+            </div>
+            <button onClick={async () => {
+              // Print bill preview (order slip with prices, without payment info)
+              const billOrder = { ...orderPreview, method: "bill", cash: 0, change: 0 };
+              await printReceipt(billOrder);
+              toast("✅ Bill diprint!", "#4ade80");
+            }} style={{ width: "100%", padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+              🧾 Print Bill (Belum Bayar)
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── QR ORDER HISTORY MODAL ── */}
       {showQrHistory && (
         <div style={S.modal} onClick={() => setShowQrHistory(false)}>
@@ -1819,20 +1862,36 @@ export default function App() {
       {/* ── REPRINT MODAL ── */}
       {showReprintModal && reprintOrder && (
         <div style={S.modal} onClick={() => setShowReprintModal(false)}>
-          <div style={{ ...S.mbox, maxWidth: 360 }} onClick={e => e.stopPropagation()}>
+          <div style={{ ...S.mbox, maxWidth: 360, maxHeight: "80vh", overflowY: "auto" }} onClick={e => e.stopPropagation()}>
             <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>🖨️ Reprint</div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 16 }}>Order #{reprintOrder.num} — {reprintOrder.tableNo}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {printers.map(pr => (
                 <div key={pr.id} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px" }}>
-                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>🖨️ {pr.name} <span style={{ fontWeight: 400, color: "#64748b", fontSize: 11 }}>({pr.type?.toUpperCase()} · {pr.role === "cashier" ? "Cashier" : pr.location || "Dapur"})</span></div>
+                  <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 8 }}>🖨️ {pr.name} <span style={{ fontWeight: 400, color: "#64748b", fontSize: 11 }}>({pr.role === "cashier" ? "Cashier" : pr.location || "Dapur"})</span></div>
                   <div style={{ display: "flex", gap: 6 }}>
-                    {(pr.role !== "cashier") && <button onClick={async () => { await doPrint(pr, await buildOrderSlipBytes(reprintOrder, reprintOrder.cart, pr.showPrice, pr.printerWidth || "58")); setShowReprintModal(false); toast(`✅ Slip diprint ke ${pr.name}`, "#4ade80"); }} style={{ flex: 1, padding: "7px 0", background: "#f59e0b", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🍳 Slip</button>}
-                    {(pr.role === "cashier" || !pr.role) && <button onClick={async () => { const data = await buildReceiptBytes({ ...reprintOrder, method: reprintOrder.method || "cash", cash: reprintOrder.cash || 0, change: reprintOrder.change || 0 }, receiptConfig, pr.printerWidth || "58", false); await doPrint(pr, data); setShowReprintModal(false); toast(`✅ Resit diprint ke ${pr.name}`, "#4ade80"); }} style={{ flex: 1, padding: "7px 0", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🧾 Resit</button>}
+                    {pr.role !== "cashier" && <button onClick={async () => {
+                      const items = reprintOrder.cart;
+                      const data = buildOrderSlipBytes(reprintOrder, pr.name, items, pr.showPrice, pr.printerWidth || "58");
+                      await doPrint(pr, data);
+                      setShowReprintModal(false);
+                      toast(`✅ Slip → ${pr.name}`, "#4ade80");
+                    }} style={{ flex: 1, padding: "7px 0", background: "#f59e0b", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🍳 Print Slip</button>}
+                    {(pr.role === "cashier" || !pr.role) && <button onClick={async () => {
+                      const data = await buildReceiptBytes({ ...reprintOrder, method: reprintOrder.method || "cash", cash: reprintOrder.cash || 0, change: reprintOrder.change || 0 }, receiptConfig, pr.printerWidth || "58", false);
+                      await doPrint(pr, data);
+                      setShowReprintModal(false);
+                      toast(`✅ Resit → ${pr.name}`, "#4ade80");
+                    }} style={{ flex: 1, padding: "7px 0", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🧾 Print Resit</button>}
                   </div>
                 </div>
               ))}
-              <button onClick={async () => { await printOrderSlips(reprintOrder); await printReceipt({ ...reprintOrder, method: reprintOrder.method || "cash", cash: reprintOrder.cash || 0, change: reprintOrder.change || 0 }); setShowReprintModal(false); toast("✅ Semua printer!", "#4ade80"); }} style={{ padding: 12, background: "#475569", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🖨️ Print Semua Printer</button>
+              <button onClick={async () => {
+                // Print semua — slip ke semua dapur, SKIP cashier (drawer)
+                await printOrderSlips(reprintOrder);
+                setShowReprintModal(false);
+                toast("✅ Print semua dapur!", "#4ade80");
+              }} style={{ padding: 12, background: "#475569", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🖨️ Print Semua Dapur</button>
               <button onClick={() => setShowReprintModal(false)} style={{ padding: 10, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
             </div>
           </div>
@@ -2208,10 +2267,12 @@ export default function App() {
                   const isMergeSource = mergeMode && mergeSourceKey === oKey;
                   return (
                     <div key={oKey} style={{ background: isMergeTarget ? "#f0fdf4" : isMergeSource ? "#fef9c3" : "#f0fdf4", border: `2px solid ${isMergeTarget ? "#22c55e" : isMergeSource ? "#f59e0b" : "#22c55e"}`, borderRadius: 14, padding: 14 }}>
-                      <div style={{ fontWeight: 700, color: "#166534", marginBottom: 4 }}>Order #{order.num}</div>
-                      {order.customerName && <div style={{ fontSize: 11, color: "#166534", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone || "-"}</div>}
-                      <div style={{ fontSize: 12, color: "#166534", marginBottom: 2 }}>{order.cart.length} item · {order.orderType}</div>
-                      <div style={{ fontSize: 18, fontWeight: 700, color: "#22c55e", marginBottom: 10 }}>{formatRM(order.total)}</div>
+                      <div onClick={() => !mergeMode && setOrderPreview(order)} style={{ cursor: mergeMode ? "default" : "pointer", marginBottom: 6 }}>
+                        <div style={{ fontWeight: 700, color: "#166534", marginBottom: 2 }}>Order #{order.num} {!mergeMode && <span style={{ fontSize: 10, color: "#22c55e", fontWeight: 400 }}>👆 tap item</span>}</div>
+                        {order.customerName && <div style={{ fontSize: 11, color: "#166534", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone || "-"}</div>}
+                        <div style={{ fontSize: 12, color: "#166534", marginBottom: 2 }}>{order.cart.length} item · {order.orderType}</div>
+                        <div style={{ fontSize: 18, fontWeight: 700, color: "#22c55e" }}>{formatRM(order.total)}</div>
+                      </div>
                       {mergeMode ? (
                         <button onClick={() => isMergeSource ? (setMergeMode(false), setMergeSourceKey(null)) : doMerge(oKey)}
                           style={{ width: "100%", padding: "8px 0", background: isMergeSource ? "#f59e0b" : "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
