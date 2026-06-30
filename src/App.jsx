@@ -342,6 +342,7 @@ export default function App() {
   const [currentOrderType, setCurrentOrderType] = useState(null);
   const [currentTable, setCurrentTable] = useState(null);
   const [cart, setCart] = useState([]);
+  const [editingDraftKey, setEditingDraftKey] = useState(null);
   const [fCat, setFCat] = useState("all");
   const [fSub, setFSub] = useState("all");
   const [search, setSearch] = useState("");
@@ -1250,7 +1251,6 @@ export default function App() {
   const [showReprintModal, setShowReprintModal] = useState(false);
   const [reprintOrder, setReprintOrder] = useState(null);
   const [orderPreview, setOrderPreview] = useState(null);
-  const [editingDraftKey, setEditingDraftKey] = useState(null);
   const [qrSubmitted, setQrSubmitted] = useState(false);
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
