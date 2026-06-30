@@ -514,6 +514,20 @@ export default function App() {
   const tax = sub * taxRate;
   const total = sub + tax;
 
+  // Auto-save draft bila cart berubah masa edit draft sedia ada
+  useEffect(() => {
+    if (!editingDraftKey) return;
+    if (cart.length === 0) return; // jangan save draft kosong
+    setActiveOrders(prev => {
+      const existing = prev[editingDraftKey];
+      if (!existing) return prev;
+      const newSub = cart.reduce((s, i) => s + i.price * i.qty, 0);
+      const newTax = newSub * taxRate;
+      const deliveryCharge = currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : (existing.deliveryCharge || 0);
+      return { ...prev, [editingDraftKey]: { ...existing, cart: [...cart], subtotal: newSub, tax: newTax, total: newSub + newTax + deliveryCharge, deliveryCharge } };
+    });
+  }, [cart, editingDraftKey]);
+
   function toast(msg, clr = "#93c5fd") { setNotif(msg); setNotifClr(clr); setTimeout(() => setNotif(null), 2500); }
 
   // ── Print functions ──────────────────────────────────────────────────────
@@ -826,7 +840,12 @@ export default function App() {
       orderKey, // key untuk identify dalam activeOrders
       displayName: currentTable ? `${currentTable.name} (Order #${num})` : `Order #${num}`,
     };
-    setActiveOrders(prev => ({ ...prev, [orderKey]: orderWithKey }));
+    setActiveOrders(prev => {
+      const n = { ...prev };
+      if (editingDraftKey) delete n[editingDraftKey]; // buang draft lama, ganti dengan order sebenar
+      n[orderKey] = orderWithKey;
+      return n;
+    });
 
     // Show sending animation then print
     setSendingOrder(true);
@@ -839,6 +858,7 @@ export default function App() {
     setCurrentTable(null);
     setCurrentOrderType(null);
     setDeliveryName(""); setDeliveryPhone(""); setDeliveryChargeInput("");
+    setEditingDraftKey(null);
   }
 
   // ── Checkout / Pay ───────────────────────────────────────────────────────
@@ -1230,6 +1250,7 @@ export default function App() {
   const [showReprintModal, setShowReprintModal] = useState(false);
   const [reprintOrder, setReprintOrder] = useState(null);
   const [orderPreview, setOrderPreview] = useState(null);
+  const [editingDraftKey, setEditingDraftKey] = useState(null);
   const [qrSubmitted, setQrSubmitted] = useState(false);
   const [qrCatFilter, setQrCatFilter] = useState("all");
   const [qrShowCombos, setQrShowCombos] = useState(false);
@@ -1828,14 +1849,23 @@ export default function App() {
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 15, fontWeight: 700, marginTop: 4 }}><span>JUMLAH</span><span style={{ color: "#f59e0b" }}>{formatRM(orderPreview.total)}</span></div>
               </div>
             </div>
-            <button onClick={async () => {
-              // Print bill preview (order slip with prices, without payment info)
-              const billOrder = { ...orderPreview, method: "bill", cash: 0, change: 0 };
-              await printReceipt(billOrder);
-              toast("✅ Bill diprint!", "#4ade80");
-            }} style={{ width: "100%", padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
-              🧾 Print Bill (Belum Bayar)
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => {
+                const key = orderPreview.orderKey || orderPreview.id;
+                setOrderPreview(null);
+                openEditOrder(key);
+              }} style={{ flex: 1, padding: 12, background: "#3b82f6", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                ✏️ Edit Order
+              </button>
+              <button onClick={async () => {
+                // Print bill preview (order slip with prices, without payment info)
+                const billOrder = { ...orderPreview, method: "bill", cash: 0, change: 0 };
+                await printReceipt(billOrder);
+                toast("✅ Bill diprint!", "#4ade80");
+              }} style={{ flex: 1, padding: 12, background: "#475569", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                🧾 Print Bill
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2138,10 +2168,10 @@ export default function App() {
                   🖨️ CREATE ORDER
                 </button>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button onClick={() => { setPage("tables"); setCart([]); }} style={{ flex: 1, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 12 }}>← Balik</button>
+                  <button onClick={() => { setPage("tables"); setCart([]); setEditingDraftKey(null); setCurrentTable(null); setCurrentOrderType(null); }} style={{ flex: 1, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 12 }}>← Balik {editingDraftKey ? "(draft tersimpan)" : ""}</button>
                   <button onClick={() => {
                     if (cart.length === 0) return;
-                    const draftKey = `draft_${Date.now()}`;
+                    const draftKey = editingDraftKey || `draft_${Date.now()}`;
                     const draft = {
                       orderKey: draftKey, id: draftKey, num: orderNum, cart: [...cart],
                       subtotal: sub, tax, total: total + (currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0),
@@ -2153,8 +2183,8 @@ export default function App() {
                       displayName: currentTable ? `${currentTable.name} (Draft)` : `Draft #${orderNum}`,
                     };
                     setActiveOrders(prev => ({ ...prev, [draftKey]: draft }));
-                    setOrderNum(n => n + 1);
-                    setCart([]); setPage("tables"); setCurrentTable(null); setCurrentOrderType(null);
+                    if (!editingDraftKey) setOrderNum(n => n + 1);
+                    setCart([]); setPage("tables"); setCurrentTable(null); setCurrentOrderType(null); setEditingDraftKey(null);
                     toast("💾 Draft disimpan!", "#8b5cf6");
                   }} style={{ flex: 1, padding: 10, background: "#ede9fe", border: "1px solid #8b5cf6", borderRadius: 8, color: "#7c3aed", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>💾 Save Draft</button>
                 </div>
@@ -2258,7 +2288,7 @@ export default function App() {
                         <button onClick={() => {
                           setCart(order.cart); setCurrentTable(order.tableId ? tables.find(t => t.id === order.tableId) || null : null);
                           setCurrentOrderType(ORDER_TYPES.find(t => t.label === order.orderType) || null);
-                          setActiveOrders(prev => { const n = { ...prev }; delete n[oKey]; return n; });
+                          setEditingDraftKey(oKey);
                           setPage("order");
                         }} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>▶ Sambung</button>
                         <button onClick={() => { if (window.confirm("Padam draft?")) { setActiveOrders(prev => { const n = { ...prev }; delete n[oKey]; return n; }); } }} style={{ padding: "7px 4px", background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 7, color: "#ef4444", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🗑️ Padam</button>
