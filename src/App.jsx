@@ -480,22 +480,31 @@ export default function App() {
     return () => unsub();
   }, []);
 
+  const pendingAlertRef = useRef(null);
+  useEffect(() => { pendingAlertRef.current = pendingAlert; }, [pendingAlert]);
   const acceptPendingOrderRef = useRef(null);
   useEffect(() => { acceptPendingOrderRef.current = acceptPendingOrder; });
 
-  // Countdown timer for auto-accept
+  // Countdown timer for auto-accept — interval-based, immune to state clears
   useEffect(() => {
     if (!pendingAlert) return;
-    if (alertCountdown <= 0) {
-      const toAccept = pendingAlert;
-      setPendingAlert(null);
-      setAlertCountdown(30);
-      acceptPendingOrderRef.current?.(toAccept);
-      return;
-    }
-    const t = setTimeout(() => setAlertCountdown(c => c - 1), 1000);
-    return () => clearTimeout(t);
-  }, [alertCountdown, pendingAlert]);
+    setAlertCountdown(30);
+    const interval = setInterval(() => {
+      setAlertCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          const toAccept = pendingAlertRef.current;
+          if (toAccept && !processingAccept.current) {
+            setPendingAlert(null);
+            acceptPendingOrderRef.current?.(toAccept);
+          }
+          return 30;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [pendingAlert?._docId]);
 
   // QR Base URL — Vercel deployment
   const qrBaseUrl = "https://warung-pos-nine.vercel.app";
@@ -2198,13 +2207,18 @@ export default function App() {
                     const isMergeSource = mergeMode && mergeSourceKey === oKey;
                     return (
                       <div key={oKey} style={{ background: isMergeTarget ? "#f0fdf4" : isMergeSource ? "#fef9c3" : "#fff7ed", border: `2px solid ${isMergeTarget ? "#22c55e" : isMergeSource ? "#f59e0b" : "#f59e0b"}`, borderRadius: 14, padding: 14, boxShadow: "0 2px 12px rgba(245,158,11,.15)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-                          <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e" }}>{order.displayName || order.tableNo}</div>
-                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
+                        <div onClick={() => !mergeMode && setOrderPreview(order)} style={{ cursor: mergeMode ? "default" : "pointer", marginBottom: 6 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 2 }}>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: "#92400e" }}>{order.displayName || order.tableNo}</div>
+                            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                              {!mergeMode && <span style={{ fontSize: 10, color: "#f59e0b" }}>👆 tap</span>}
+                              <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b" }} />
+                            </div>
+                          </div>
+                          {order.customerName && <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone}</div>}
+                          <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>{order.cart.length} item · {fmtTime(order.time)} · {order.orderType}</div>
+                          <div style={{ fontSize: 18, fontWeight: 700, color: "#f59e0b" }}>{formatRM(order.total)}</div>
                         </div>
-                        {order.customerName && <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>👤 {order.customerName} · 📞 {order.customerPhone}</div>}
-                        <div style={{ fontSize: 11, color: "#92400e", marginBottom: 2 }}>{order.cart.length} item · {fmtTime(order.time)} · {order.orderType}</div>
-                        <div style={{ fontSize: 18, fontWeight: 700, color: "#f59e0b", marginBottom: 10 }}>{formatRM(order.total)}</div>
                         {mergeMode ? (
                           <button onClick={() => isMergeSource ? (setMergeMode(false), setMergeSourceKey(null)) : doMerge(oKey)}
                             style={{ width: "100%", padding: "8px 0", background: isMergeSource ? "#f59e0b" : "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 12, cursor: "pointer" }}>
