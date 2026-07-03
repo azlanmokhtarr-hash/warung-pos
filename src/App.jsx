@@ -549,11 +549,6 @@ export default function App() {
     const handleVisibilityChange = async () => {
       if (document.visibilityState === "visible") {
         await requestWakeLock();
-        // Re-check pending orders bila app resume
-        try {
-          const { getDocs } = await import("firebase/firestore");
-          const { getDocs: gd } = await import("firebase/firestore");
-        } catch {}
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
@@ -566,7 +561,7 @@ export default function App() {
   // ── Alert sound untuk order baru masuk ──────────────────────────────────────
   function playAlertSound(volume = alertVolume) {
     try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const AudioCtx = window.AudioContext || window["webkitAudioContext"];
       if (!AudioCtx) return;
       const ctx = new AudioCtx();
       const times = [0, 0.15, 0.3];
