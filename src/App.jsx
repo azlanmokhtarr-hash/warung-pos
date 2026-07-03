@@ -468,11 +468,12 @@ export default function App() {
       const newOnes = orders.filter(o => o.status === "pending");
       setNewPendingCount(newOnes.length);
       if (newOnes.length > 0) {
+        const latest = newOnes[0];
         setPendingAlert(prev => {
-          if (!prev || prev._docId !== newOnes[0]._docId) {
+          if (!prev || prev._docId !== latest._docId) {
             setAlertCountdown(30);
-            playAlertSound();
-            return newOnes[0];
+            setTimeout(() => playAlertSound(), 0);
+            return latest;
           }
           return prev;
         });
@@ -536,27 +537,23 @@ export default function App() {
 
   // ── Wake Lock — prevent tablet sleep bila app terbuka ──────────────────────
   useEffect(() => {
-    if (isQROrderPage) return;
     async function requestWakeLock() {
       try {
         if ("wakeLock" in navigator) {
           wakeLockRef.current = await navigator.wakeLock.request("screen");
         }
-      } catch (e) { /* wakeLock tak supported — okay je */ }
+      } catch (e) {}
     }
     requestWakeLock();
-    // Reacquire wake lock bila page visible balik (contoh: balik dari apps lain)
     const handleVisibilityChange = async () => {
-      if (document.visibilityState === "visible") {
-        await requestWakeLock();
-      }
+      if (document.visibilityState === "visible") await requestWakeLock();
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       wakeLockRef.current?.release?.();
     };
-  }, [isQROrderPage]);
+  }, []);
 
   // ── Alert sound untuk order baru masuk ──────────────────────────────────────
   function playAlertSound(volume = alertVolume) {
