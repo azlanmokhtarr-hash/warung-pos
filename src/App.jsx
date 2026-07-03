@@ -324,6 +324,8 @@ export default function App() {
   const [orderNum, setOrderNum] = useLocalStorage("pos_ordernum", 1042);
   const [taxConfig, setTaxConfig] = useLocalStorage("pos_tax_config", { enabled: true, rate: 6, label: "SST" });
   const [receiptConfig, setReceiptConfig] = useLocalStorage("pos_receipt_config", { shopName: "WARUNG DIGITAL", phone: "03-1234 5678", address: "", footer: "Terima Kasih! Sila Datang Lagi", logoBase64: "" });
+  const [alertVolume, setAlertVolume] = useLocalStorage("pos_alert_volume", 0.7); // 0.0 - 1.0
+  const wakeLockRef = useRef(null);
 
   // App state
   const [page, setPage] = useState("tables");
@@ -469,6 +471,7 @@ export default function App() {
         setPendingAlert(prev => {
           if (!prev || prev._docId !== newOnes[0]._docId) {
             setAlertCountdown(30);
+            playAlertSound();
             return newOnes[0];
           }
           return prev;
@@ -530,6 +533,56 @@ export default function App() {
   }, [cart, editingDraftKey]);
 
   function toast(msg, clr = "#93c5fd") { setNotif(msg); setNotifClr(clr); setTimeout(() => setNotif(null), 2500); }
+
+  // ── Wake Lock — prevent tablet sleep bila app terbuka ──────────────────────
+  useEffect(() => {
+    if (isQROrderPage) return;
+    async function requestWakeLock() {
+      try {
+        if ("wakeLock" in navigator) {
+          wakeLockRef.current = await navigator.wakeLock.request("screen");
+        }
+      } catch (e) { /* wakeLock tak supported — okay je */ }
+    }
+    requestWakeLock();
+    // Reacquire wake lock bila page visible balik (contoh: balik dari apps lain)
+    const handleVisibilityChange = async () => {
+      if (document.visibilityState === "visible") {
+        await requestWakeLock();
+        // Re-check pending orders bila app resume
+        try {
+          const { getDocs } = await import("firebase/firestore");
+          const { getDocs: gd } = await import("firebase/firestore");
+        } catch {}
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      wakeLockRef.current?.release?.();
+    };
+  }, [isQROrderPage]);
+
+  // ── Alert sound untuk order baru masuk ──────────────────────────────────────
+  function playAlertSound(volume = alertVolume) {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const times = [0, 0.15, 0.3];
+      times.forEach(t => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.frequency.value = 880;
+        osc.type = "sine";
+        gain.gain.setValueAtTime(0, ctx.currentTime + t);
+        gain.gain.linearRampToValueAtTime(volume, ctx.currentTime + t + 0.05);
+        gain.gain.linearRampToValueAtTime(0, ctx.currentTime + t + 0.2);
+        osc.start(ctx.currentTime + t);
+        osc.stop(ctx.currentTime + t + 0.25);
+      });
+    } catch (e) {}
+  }
 
   // ── Print functions ──────────────────────────────────────────────────────
   async function doPrint(printer, data) {
@@ -2738,6 +2791,17 @@ export default function App() {
             {settingsTab === "receipt" && (
               <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 16 }}>🧾 Tetapan Resit</div>
+                <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                  <label style={S.lbl}>🔔 Volume Alert Order QR</label>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span style={{ fontSize: 12 }}>🔈</span>
+                    <input type="range" min="0" max="1" step="0.1" value={alertVolume} onChange={e => setAlertVolume(parseFloat(e.target.value))} style={{ flex: 1 }} />
+                    <span style={{ fontSize: 12 }}>🔊</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, minWidth: 32 }}>{Math.round(alertVolume * 100)}%</span>
+                    <button onClick={() => playAlertSound(alertVolume)} style={{ padding: "4px 10px", background: "#3b82f6", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, cursor: "pointer" }}>Test</button>
+                  </div>
+                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Bunyi ni akan berbunyi bila order QR baru masuk.</div>
+                </div>
                 <div style={{ marginBottom: 12 }}>
                   <label style={S.lbl}>Nama Kedai</label>
                   <input value={receiptConfig.shopName} onChange={e => setReceiptConfig(c => ({ ...c, shopName: e.target.value }))} placeholder="WARUNG DIGITAL" style={S.inp} />
