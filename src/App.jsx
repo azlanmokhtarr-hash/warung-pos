@@ -482,7 +482,7 @@ export default function App() {
   }, []);
 
   const pendingAlertRef = useRef(null);
-  useEffect(() => { pendingAlertRef.current = pendingAlert; }, [pendingAlert]);
+  useEffect(() => { if (pendingAlert) pendingAlertRef.current = pendingAlert; }, [pendingAlert]);
   const acceptPendingOrderRef = useRef(null);
   useEffect(() => { acceptPendingOrderRef.current = acceptPendingOrder; });
 
