@@ -1211,7 +1211,7 @@ export default function App() {
   const catSubs = fCat !== "all" ? (categories.find(c => c.id === fCat)?.subcategories || []) : [];
   const itemSubs = categories.find(c => c.id === itemF.categoryId)?.subcategories || [];
   const sections = [...new Set(tables.map(t => t.section))];
-  const change = parseFloat(cashIn) - (selectedTable ? activeOrders[selectedTable.id]?.total || 0 : 0);
+  const change = parseFloat(cashIn) - Math.max(0, (selectedTable ? activeOrders[selectedTable.id]?.total || 0 : 0) - (parseFloat(discountInput) || 0) + (parseFloat(topupInput) || 0));
   // Today's orders only
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
   const todayOrders = salesHistory.filter(o => new Date(o.time) >= todayStart);
@@ -2074,12 +2074,15 @@ export default function App() {
               </div>
             )}
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <button onClick={() => { if (payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))) return; checkout(activeOrders[selectedTable.id], false); }}
-                disabled={payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))}
-                style={{ flex: 1, padding: 12, background: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#e2e8f0" : "#64748b", border: "none", borderRadius: 8, color: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 13, cursor: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "not-allowed" : "pointer" }}>✅ Bayar (Tanpa Print)</button>
-              <button onClick={() => checkout(activeOrders[selectedTable.id], true)}
-                disabled={payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0))}
-                style={{ flex: 1, padding: 12, background: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#e2e8f0" : "#22c55e", border: "none", borderRadius: 8, color: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "#94a3b8" : "#fff", fontWeight: 700, fontSize: 13, cursor: payMethod === "cash" && (!cashIn || parseFloat(cashIn) < (activeOrders[selectedTable.id]?.total || 0)) ? "not-allowed" : "pointer" }}>🖨️ Bayar + Print Resit</button>
+              {(() => {
+                const finalTotal = Math.max(0, (activeOrders[selectedTable.id]?.total || 0) - (parseFloat(discountInput) || 0) + (parseFloat(topupInput) || 0));
+                const cashInsufficient = payMethod === "cash" && (!cashIn || parseFloat(cashIn) < finalTotal);
+                const btnStyle = (active) => ({ flex: 1, padding: 12, border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: cashInsufficient ? "not-allowed" : "pointer", background: cashInsufficient ? "#e2e8f0" : active ? "#22c55e" : "#64748b", color: cashInsufficient ? "#94a3b8" : "#fff" });
+                return (<>
+                  <button onClick={() => { if (cashInsufficient) return; checkout(activeOrders[selectedTable.id], false); }} disabled={cashInsufficient} style={btnStyle(false)}>✅ Bayar (Tanpa Print)</button>
+                  <button onClick={() => { if (cashInsufficient) return; checkout(activeOrders[selectedTable.id], true); }} disabled={cashInsufficient} style={btnStyle(true)}>🖨️ Bayar + Print Resit</button>
+                </>);
+              })()}
             </div>
             <button onClick={() => setShowPayModal(false)} style={{ width: "100%", marginTop: 8, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", color: "#64748b" }}>← Batal</button>
           </div>
