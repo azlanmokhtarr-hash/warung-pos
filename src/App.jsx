@@ -566,7 +566,9 @@ export default function App() {
   // ── Alert sound untuk order baru masuk ──────────────────────────────────────
   function playAlertSound(volume = alertVolume) {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
       const times = [0, 0.15, 0.3];
       times.forEach(t => {
         const osc = ctx.createOscillator();
