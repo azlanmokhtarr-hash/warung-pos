@@ -173,20 +173,21 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
     if (i.note) add(`  >> ${i.note}`);
   });
   add("-".repeat(W));
-  const padW = W - 8;
-  add(`${"Subtotal".padEnd(padW)}${formatRM(order.subtotal)}`);
-  if (order.tax > 0) add(`${"SST (6%)".padEnd(padW)}${formatRM(order.tax)}`);
-  if ((order.discount || 0) > 0) add(`${"Diskaun".padEnd(padW)}-${formatRM(order.discount)}`);
-  if ((order.topup || 0) > 0) add(`${"Topup/Extra".padEnd(padW)}+${formatRM(order.topup)}`);
-  if (order.deliveryCharge > 0) add(`${"Caj Penghantaran".padEnd(padW)}${formatRM(order.deliveryCharge)}`);
+  const addSummary = (label, value) => {
+    const line = `${label}${" ".repeat(Math.max(1, W - label.length - value.length))}${value}`;
+    if (line.length <= W) { add(line); } else { add(label); add(" ".repeat(Math.max(1, W - value.length)) + value); }
+  };
+  addSummary("Subtotal", formatRM(order.subtotal));
+  if (order.tax > 0) addSummary("SST (6%)", formatRM(order.tax));
+  if ((order.discount || 0) > 0) addSummary("Diskaun", `-${formatRM(order.discount)}`);
+  if ((order.topup || 0) > 0) addSummary("Topup/Extra", `+${formatRM(order.topup)}`);
+  if (order.deliveryCharge > 0) addSummary("Caj Penghantaran", formatRM(order.deliveryCharge));
   bytes.push(ESC, 0x45, 0x01);
-  add(`${"JUMLAH".padEnd(padW)}${formatRM(order.total)}`);
+  addSummary("JUMLAH", formatRM(order.total));
   bytes.push(ESC, 0x45, 0x00);
   if (order.method === "cash") {
-    const cashLine = `${"Tunai".padEnd(padW)}${formatRM(order.cash)}`;
-    const bakiLine = `${"Baki".padEnd(padW)}${formatRM(order.change)}`;
-    add(cashLine);
-    add(bakiLine);
+    addSummary("Tunai", formatRM(order.cash));
+    addSummary("Baki", formatRM(order.change));
   }
   add("-".repeat(W));
   bytes.push(ESC, 0x61, 0x01);
@@ -204,9 +205,11 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
   const add = (t) => bytes.push(...enc.encode(t + "\n"));
   bytes.push(ESC, 0x40);
   bytes.push(ESC, 0x61, 0x01);
+  bytes.push(GS, 0x21, 0x11); // double width + double height
   bytes.push(ESC, 0x45, 0x01);
-  add("*** ORDER SLIP ***");
+  add("ORDER SLIP");
   bytes.push(ESC, 0x45, 0x00);
+  bytes.push(GS, 0x21, 0x00); // normal size
   add(printerName.toUpperCase());
   bytes.push(ESC, 0x61, 0x00);
   add("-".repeat(W));
@@ -217,6 +220,7 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
   if (order.customerPhone) add(`Tel: ${order.customerPhone}`);
   add("-".repeat(W));
   items.forEach(i => {
+    bytes.push(GS, 0x21, 0x01); // double height for item name
     bytes.push(ESC, 0x45, 0x01);
     if (showPrice) {
       const l = `${i.name} x${i.qty}`, r = formatRM(i.price * i.qty);
@@ -225,6 +229,7 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
       add(`${i.name} x${i.qty}`);
     }
     bytes.push(ESC, 0x45, 0x00);
+    bytes.push(GS, 0x21, 0x00); // normal size
     // Item dalam set — print bawah nama set (bukan tepi)
     if (i.comboItems && i.comboItems.length > 0) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
     if (i.note) { bytes.push(ESC, 0x45, 0x01); add(`  >> ${i.note}`); bytes.push(ESC, 0x45, 0x00); }
