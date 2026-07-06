@@ -197,12 +197,13 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
   return new Uint8Array(bytes);
 }
 
-function buildOrderSlipBytes(order, printerName, items, showPrice = false, printerWidth = "58") {
+function buildOrderSlipBytes(order, printerName, items, showPrice = false, printerWidth = "58", fontMode = "normal") {
   const ESC = 0x1B, GS = 0x1D;
   const W = getPrintWidth(printerWidth);
   const enc = new TextEncoder();
   const bytes = [];
   const add = (t) => bytes.push(...enc.encode(t + "\n"));
+  const fontCmd = fontMode === "big" ? 0x11 : fontMode === "tall" ? 0x01 : 0x00;
   bytes.push(ESC, 0x40);
   bytes.push(ESC, 0x61, 0x01);
   bytes.push(GS, 0x21, 0x11); // double width + double height
@@ -219,8 +220,9 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
   if (order.customerName) add(`Nama: ${order.customerName}`);
   if (order.customerPhone) add(`Tel: ${order.customerPhone}`);
   add("-".repeat(W));
-  items.forEach(i => {
-    bytes.push(GS, 0x21, 0x01); // double height for item name
+  items.forEach((i, idx) => {
+    if (idx > 0) add(""); // space between items
+    bytes.push(GS, 0x21, fontCmd); // apply selected font size
     bytes.push(ESC, 0x45, 0x01);
     if (showPrice) {
       const l = `${i.name} x${i.qty}`, r = formatRM(i.price * i.qty);
@@ -230,7 +232,6 @@ function buildOrderSlipBytes(order, printerName, items, showPrice = false, print
     }
     bytes.push(ESC, 0x45, 0x00);
     bytes.push(GS, 0x21, 0x00); // normal size
-    // Item dalam set — print bawah nama set (bukan tepi)
     if (i.comboItems && i.comboItems.length > 0) i.comboItems.forEach(ci => add(`  - ${ci.name} x${ci.qty}`));
     if (i.note) { bytes.push(ESC, 0x45, 0x01); add(`  >> ${i.note}`); bytes.push(ESC, 0x45, 0x00); }
     if (i.notes) add(`  >> ${i.notes}`);
@@ -648,7 +649,8 @@ export default function App() {
         printer.location || printer.name,
         items,
         printer.showPrice || false,
-        printer.printerWidth || "58"
+        printer.printerWidth || "58",
+        printer.slipFontSize || "normal"
       );
 
       await doPrint(printer, slipData);
@@ -985,8 +987,8 @@ export default function App() {
   const saveSub = () => { if (!subF.name) return; if (editSub) setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: c.subcategories.map(s => s.id === editSub.id ? { ...s, name: subF.name } : s) } : c)); else setCategories(p => p.map(c => c.id === subF.catId ? { ...c, subcategories: [...c.subcategories, { id: `s${Date.now()}`, name: subF.name }] } : c)); toast("✅ Dikemaskini"); setSubModal(false); };
   const delSub = (sId, cId) => { if (window.confirm("Padam sub?")) { setCategories(p => p.map(c => c.id === cId ? { ...c, subcategories: c.subcategories.filter(s => s.id !== sId) } : c)); toast("🗑️ Dipadam"); } };
 
-  const openAddPrinter = () => { setEditPrinter(null); setPF({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false, printerWidth: "58", cashDrawer: false }); setBtDevs([]); setPrinterModal(true); };
-  const openEditPrinter = (p) => { setEditPrinter(p); setPF({ name: p.name, type: p.type, btType: p.btType || "classic", ip: p.ip || "", port: p.port || "9100", deviceId: p.deviceId || "", location: p.location || "Kaunter", role: p.role || "cashier", showPrice: p.showPrice || false, printerWidth: p.printerWidth || "58", cashDrawer: p.cashDrawer || false }); setPrinterModal(true); };
+  const openAddPrinter = () => { setEditPrinter(null); setPF({ name: "", type: "bluetooth", btType: "classic", ip: "", port: "9100", deviceId: "", location: "Kaunter", role: "cashier", showPrice: false, printerWidth: "58", cashDrawer: false, slipFontSize: "normal" }); setBtDevs([]); setPrinterModal(true); };
+  const openEditPrinter = (p) => { setEditPrinter(p); setPF({ name: p.name, type: p.type, btType: p.btType || "classic", ip: p.ip || "", port: p.port || "9100", deviceId: p.deviceId || "", location: p.location || "Kaunter", role: p.role || "cashier", showPrice: p.showPrice || false, printerWidth: p.printerWidth || "58", cashDrawer: p.cashDrawer || false, slipFontSize: p.slipFontSize || "normal" }); setPrinterModal(true); };
   const savePrinter = () => { if (!pF.name) return; const d = { ...pF, id: editPrinter ? editPrinter.id : `pr${Date.now()}` }; if (editPrinter) setPrinters(p => p.map(i => i.id === editPrinter.id ? d : i)); else setPrinters(p => [...p, d]); toast("✅ Printer disimpan"); setPrinterModal(false); };
   const delPrinter = (id) => { if (window.confirm("Padam printer?")) { setPrinters(p => p.filter(i => i.id !== id)); toast("🗑️ Dipadam"); } };
   const doScan = async () => { setScanning(true); toast("📡 Scan..."); const d = await (pF.btType === "ble" ? scanBTBLE() : scanBTClassic()); setBtDevs(d); setScanning(false); toast(d.length ? `${d.length} device` : "Tiada device", d.length ? "#4ade80" : "#f87171"); };
@@ -1969,7 +1971,7 @@ export default function App() {
                   <div style={{ display: "flex", gap: 6 }}>
                     {pr.role !== "cashier" && <button onClick={async () => {
                       const items = reprintOrder.cart;
-                      const data = buildOrderSlipBytes(reprintOrder, pr.name, items, pr.showPrice, pr.printerWidth || "58");
+                      const data = buildOrderSlipBytes(reprintOrder, pr.name, items, pr.showPrice, pr.printerWidth || "58", pr.slipFontSize || "normal");
                       await doPrint(pr, data);
                       setShowReprintModal(false);
                       toast(`✅ Slip → ${pr.name}`, "#4ade80");
@@ -2225,35 +2227,35 @@ export default function App() {
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span style={{ fontSize: 18 }}>{i.emoji}</span>
                       <div style={{ flex: 1 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600 }}>{i.name}</div>
-                        <div style={{ fontSize: 12, color: "#3b82f6" }}>{formatRM(i.price)}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: "#000" }}>{i.name}</div>
+                        <div style={{ fontSize: 12, color: "#000" }}>{formatRM(i.price)}</div>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <button onClick={() => updQty(i._key, -1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>−</button>
-                        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 18, textAlign: "center" }}>{i.qty}</span>
-                        <button onClick={() => updQty(i._key, 1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700 }}>+</button>
+                        <button onClick={() => updQty(i._key, -1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#000" }}>−</button>
+                        <span style={{ fontSize: 13, fontWeight: 700, minWidth: 18, textAlign: "center", color: "#000" }}>{i.qty}</span>
+                        <button onClick={() => updQty(i._key, 1)} style={{ width: 24, height: 24, borderRadius: 6, border: "1px solid #e2e8f0", background: "#f1f5f9", cursor: "pointer", fontSize: 14, fontWeight: 700, color: "#000" }}>+</button>
                       </div>
-                      <div style={{ fontSize: 13, fontWeight: 700, minWidth: 52, textAlign: "right" }}>{formatRM(i.price * i.qty)}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, minWidth: 52, textAlign: "right", color: "#000" }}>{formatRM(i.price * i.qty)}</div>
                     </div>
-                    {i.comboItems && i.comboItems.length > 0 && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId || ci.customId} style={{ fontSize: 11, color: "#94a3b8" }}>· {ci.name} x{ci.qty}</div>)}</div>}
+                    {i.comboItems && i.comboItems.length > 0 && <div style={{ paddingLeft: 28, marginTop: 3 }}>{i.comboItems.map(ci => <div key={ci.productId || ci.customId} style={{ fontSize: 11, color: "#333" }}>· {ci.name} x{ci.qty}</div>)}</div>}
                     <div style={{ paddingLeft: 28, marginTop: 2, display: "flex", alignItems: "center", gap: 6 }}>
                       {i.note && <span style={{ fontSize: 10, color: "#f59e0b", background: "#fff7ed", borderRadius: 4, padding: "1px 6px", border: "1px solid #f59e0b" }}>📝 {i.note}</span>}
-                      <button onClick={() => { setNoteTargetKey(i._key); setNoteText(i.note || ""); setNoteModal(true); }} style={{ fontSize: 10, color: "#94a3b8", background: "none", border: "none", cursor: "pointer", padding: 0 }}>{i.note ? "✏️ Edit note" : "+ Add note"}</button>
+                      <button onClick={() => { setNoteTargetKey(i._key); setNoteText(i.note || ""); setNoteModal(true); }} style={{ fontSize: 10, color: "#333", background: "none", border: "none", cursor: "pointer", padding: 0 }}>{i.note ? "✏️ Edit note" : "+ Add note"}</button>
                     </div>
                   </div>
                 ))}
             </div>
             {cart.length > 0 && (
               <div style={{ padding: "14px 16px", borderTop: "1px solid #e2e8f0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(sub)}</span></div>
-                {tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 3 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(tax)}</span></div>}
-                {currentOrderType?.id === "delivery" && (parseFloat(deliveryChargeInput) || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#64748b", marginBottom: 10 }}><span>🛵 Caj Penghantaran</span><span>{formatRM(parseFloat(deliveryChargeInput) || 0)}</span></div>}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#1e293b", marginBottom: 14 }}><span>JUMLAH</span><span>{formatRM(total + (currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0))}</span></div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#000", marginBottom: 3 }}><span>Subtotal</span><span>{formatRM(sub)}</span></div>
+                {tax > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#000", marginBottom: 3 }}><span>{taxConfig.label} ({taxConfig.rate}%)</span><span>{formatRM(tax)}</span></div>}
+                {currentOrderType?.id === "delivery" && (parseFloat(deliveryChargeInput) || 0) > 0 && <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#000", marginBottom: 10 }}><span>🛵 Caj Penghantaran</span><span>{formatRM(parseFloat(deliveryChargeInput) || 0)}</span></div>}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 18, fontWeight: 700, color: "#000", marginBottom: 14 }}><span>JUMLAH</span><span>{formatRM(total + (currentOrderType?.id === "delivery" ? (parseFloat(deliveryChargeInput) || 0) : 0))}</span></div>
                 <button onClick={createOrder} style={{ width: "100%", padding: 14, background: "#22c55e", border: "none", borderRadius: 10, color: "#fff", fontWeight: 700, fontSize: 15, cursor: "pointer" }}>
                   🖨️ CREATE ORDER
                 </button>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  <button onClick={() => { setPage("tables"); setCart([]); setEditingDraftKey(null); setCurrentTable(null); setCurrentOrderType(null); }} style={{ flex: 1, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#64748b", cursor: "pointer", fontSize: 12 }}>← Balik {editingDraftKey ? "(draft tersimpan)" : ""}</button>
+                  <button onClick={() => { setPage("tables"); setCart([]); setEditingDraftKey(null); setCurrentTable(null); setCurrentOrderType(null); }} style={{ flex: 1, padding: 10, background: "none", border: "1px solid #e2e8f0", borderRadius: 8, color: "#333", cursor: "pointer", fontSize: 12 }}>← Balik {editingDraftKey ? "(draft tersimpan)" : ""}</button>
                   <button onClick={() => {
                     if (cart.length === 0) return;
                     const draftKey = editingDraftKey || `draft_${Date.now()}`;
@@ -2833,17 +2835,6 @@ export default function App() {
             {settingsTab === "receipt" && (
               <div style={{ background: "#fff", borderRadius: 12, padding: 20, border: "1px solid #e2e8f0" }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: "#1e293b", marginBottom: 16 }}>🧾 Tetapan Resit</div>
-                <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16 }}>
-                  <label style={S.lbl}>🔔 Volume Alert Order QR</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <span style={{ fontSize: 12 }}>🔈</span>
-                    <input type="range" min="0" max="1" step="0.1" value={alertVolume} onChange={e => setAlertVolume(parseFloat(e.target.value))} style={{ flex: 1 }} />
-                    <span style={{ fontSize: 12 }}>🔊</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, minWidth: 32 }}>{Math.round(alertVolume * 100)}%</span>
-                    <button onClick={() => playAlertSound(alertVolume)} style={{ padding: "4px 10px", background: "#3b82f6", border: "none", borderRadius: 6, color: "#fff", fontSize: 11, cursor: "pointer" }}>Test</button>
-                  </div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Bunyi ni akan berbunyi bila order QR baru masuk.</div>
-                </div>
                 <div style={{ marginBottom: 12 }}>
                   <label style={S.lbl}>Nama Kedai</label>
                   <input value={receiptConfig.shopName} onChange={e => setReceiptConfig(c => ({ ...c, shopName: e.target.value }))} placeholder="WARUNG DIGITAL" style={S.inp} />
@@ -3264,6 +3255,16 @@ export default function App() {
                 ))}
               </div>
             </div>
+            {pF.role !== "cashier" && (
+              <div style={{ marginBottom: 12 }}>
+                <label style={S.lbl}>🔡 Saiz Font Slip Dapur</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {[["normal", "Normal"], ["tall", "Tinggi 2x"], ["big", "Besar 2x2"]].map(([v, l]) => (
+                    <button key={v} onClick={() => setPF(f => ({ ...f, slipFontSize: v }))} style={{ flex: 1, padding: 10, border: "2px solid", borderRadius: 8, cursor: "pointer", background: (pF.slipFontSize || "normal") === v ? "#f59e0b" : "#f8fafc", color: (pF.slipFontSize || "normal") === v ? "#fff" : "#64748b", borderColor: (pF.slipFontSize || "normal") === v ? "#f59e0b" : "#e2e8f0", fontWeight: 600, fontSize: 12 }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            )}
             {pF.role === "cashier" && (
               <div style={{ marginBottom: 12 }}>
                 <label style={S.lbl}>🗄️ Laci Duit (Cash Drawer)</label>
@@ -3491,6 +3492,7 @@ export default function App() {
 
             {/* Add new items */}
             <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 8 }}>TAMBAH ITEM</div>
+            <input value={editOrderSearch} onChange={e => setEditOrderSearch(e.target.value)} placeholder="🔍 Cari item..." style={{ ...S.inp, marginBottom: 6 }} />
             <select onChange={e => {
               const val = e.target.value;
               if (!val) return;
@@ -3500,14 +3502,19 @@ export default function App() {
               e.target.value = "";
             }} style={{ ...S.sel, width: "100%", marginBottom: 8, fontSize: 13 }}>
               <option value="">— Pilih item untuk tambah —</option>
-              <optgroup label="🍱 Set/Combo">
+              {!editOrderSearch && <optgroup label="🍱 Set/Combo">
                 {combos.map(c => <option key={c.id} value={`combo:${c.id}`}>{c.emoji || "🍱"} {c.name} — {formatRM(c.price)}</option>)}
-              </optgroup>
+              </optgroup>}
               {categories.map(cat => (
                 <optgroup key={cat.id} label={cat.name}>
-                  {products.filter(p => p.categoryId === cat.id).map(p => <option key={p.id} value={`item:${p.id}`}>{p.emoji} {p.name} — {formatRM(p.price)}</option>)}
+                  {products.filter(p => p.categoryId === cat.id && (!editOrderSearch || p.name.toLowerCase().includes(editOrderSearch.toLowerCase()))).map(p => <option key={p.id} value={`item:${p.id}`}>{p.emoji} {p.name} — {formatRM(p.price)}</option>)}
                 </optgroup>
               ))}
+              {editOrderSearch && combos.filter(c => c.name.toLowerCase().includes(editOrderSearch.toLowerCase())).length > 0 && (
+                <optgroup label="🍱 Set/Combo">
+                  {combos.filter(c => c.name.toLowerCase().includes(editOrderSearch.toLowerCase())).map(c => <option key={c.id} value={`combo:${c.id}`}>{c.emoji || "🍱"} {c.name} — {formatRM(c.price)}</option>)}
+                </optgroup>
+              )}
             </select>
             <button onClick={commitEditOrder} style={{ marginTop: 12, width: "100%", padding: 11, background: "#22c55e", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>✅ Selesai Edit</button>
           </div>
@@ -3658,9 +3665,18 @@ export default function App() {
       {showQRModal && (
         <div style={S.modal}>
           <div style={{ ...S.mbox, maxWidth: 560 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
               <div style={{ fontSize: 17, fontWeight: 700 }}>📱 QR Order — Self Order per Meja</div>
               <button onClick={() => setShowQRModal(false)} style={{ background: "#ef4444", border: "none", borderRadius: 8, width: 32, height: 32, color: "#fff", fontSize: 16, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ background: "#f8fafc", borderRadius: 8, padding: "10px 12px", marginBottom: 10, display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: 12, color: "#64748b" }}>🔔 Volume:</span>
+              <span style={{ fontSize: 11 }}>🔈</span>
+              <input type="range" min="0" max="1" step="0.1" value={alertVolume} onChange={e => setAlertVolume(parseFloat(e.target.value))} style={{ flex: 1 }} />
+              <span style={{ fontSize: 11 }}>🔊</span>
+              <span style={{ fontSize: 11, fontWeight: 700, minWidth: 30 }}>{Math.round(alertVolume * 100)}%</span>
+              <button onClick={() => playAlertSound(alertVolume)} style={{ padding: "3px 8px", background: "#3b82f6", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, cursor: "pointer" }}>Test</button>
+              <button onClick={() => { setShowQRModal(false); setShowQrHistory(true); }} style={{ padding: "3px 8px", background: "#475569", border: "none", borderRadius: 5, color: "#fff", fontSize: 11, cursor: "pointer" }}>📜 History</button>
             </div>
             <div style={{ fontSize: 12, color: "#64748b", marginBottom: 14, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "8px 12px" }}>
               💡 Customer scan QR → buka dalam WiFi kedai → isi nama + phone → order terus masuk dashboard
@@ -3746,28 +3762,35 @@ export default function App() {
                 }
 
                 function printQR() {
-                  const img = document.getElementById(imgId);
-                  if (!img) return;
-                  const win = window.open("", "_blank");
-                  win.document.write(`
-                    <html><head><title>QR ${t.name}</title>
-                    <style>
-                      body { margin: 0; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #fff; font-family: 'Segoe UI', sans-serif; }
-                      .card { border: 3px solid #f59e0b; border-radius: 16px; padding: 24px; text-align: center; width: 260px; }
-                      h2 { margin: 0 0 4px; font-size: 20px; color: #1e293b; }
-                      p { margin: 0 0 14px; font-size: 13px; color: #64748b; }
-                      img { width: 200px; height: 200px; border: 3px solid #f59e0b; border-radius: 8px; }
-                      small { display: block; margin-top: 10px; font-size: 10px; color: #94a3b8; word-break: break-all; }
-                    </style></head>
-                    <body><div class="card">
-                      <h2>${t.name}</h2>
-                      <p>Scan untuk order</p>
-                      <img src="${img.src}" />
-                      <small>${qrUrl}</small>
-                    </div></body></html>
-                  `);
-                  win.document.close();
-                  win.onload = () => { win.print(); };
+                  // Show printer selection popup
+                  const printerNames = printers.map((p, i) => `${i + 1}. ${p.name}`).join("\n");
+                  const choice = printers.length === 0 ? null : printers.length === 1 ? 0 : parseInt(prompt(`Pilih printer:\n${printerNames}\n\nTaip nombor (1-${printers.length}):`) || "0") - 1;
+                  if (choice === null || choice < 0 || choice >= printers.length) return;
+                  const pr = printers[choice];
+                  // Build ESC/POS bytes for QR label
+                  const ESC = 0x1B, GS = 0x1D;
+                  const W = pr.printerWidth === "80" ? 48 : 32;
+                  const enc = new TextEncoder();
+                  const bytes = [];
+                  bytes.push(ESC, 0x40); // init
+                  bytes.push(ESC, 0x61, 0x01); // center
+                  bytes.push(GS, 0x21, 0x11); // double size
+                  bytes.push(...enc.encode(t.name + "\n"));
+                  bytes.push(GS, 0x21, 0x00); // normal
+                  bytes.push(...enc.encode("Scan untuk order\n\n"));
+                  // QR code command (ESC/POS)
+                  const qrData = enc.encode(qrUrl);
+                  const qrSize = 8; // module size
+                  bytes.push(GS, 0x28, 0x6B, 4, 0, 0x31, 0x41, 0x32, 0x00); // model
+                  bytes.push(GS, 0x28, 0x6B, 3, 0, 0x31, 0x43, qrSize); // size
+                  bytes.push(GS, 0x28, 0x6B, 3, 0, 0x31, 0x45, 0x30); // error correction
+                  const dataLen = qrData.length + 3;
+                  bytes.push(GS, 0x28, 0x6B, dataLen & 0xFF, (dataLen >> 8) & 0xFF, 0x31, 0x50, 0x30);
+                  bytes.push(...qrData);
+                  bytes.push(GS, 0x28, 0x6B, 3, 0, 0x31, 0x51, 0x30); // print QR
+                  bytes.push(...enc.encode("\n\n"));
+                  bytes.push(ESC, 0x69); // cut
+                  doPrint(pr, new Uint8Array(bytes)).then(() => toast(`✅ QR ${t.name} diprint ke ${pr.name}!`, "#4ade80")).catch(() => toast("❌ Print gagal", "#ef4444"));
                 }
 
                 return (
