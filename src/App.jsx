@@ -179,8 +179,8 @@ async function buildReceiptBytes(order, receiptConfig = {}, printerWidth = "58",
   };
   addSummary("Subtotal", formatRM(order.subtotal));
   if (order.tax > 0) addSummary("SST (6%)", formatRM(order.tax));
-  if ((order.discount || 0) > 0) addSummary("Diskaun", `-${formatRM(order.discount)}`);
-  if ((order.topup || 0) > 0) addSummary("Topup/Extra", `+${formatRM(order.topup)}`);
+  if ((order.discount || 0) > 0) { addSummary("Diskaun", `-${formatRM(order.discount)}`); if (order.discountReason) add(`  (${order.discountReason})`); }
+  if ((order.topup || 0) > 0) { addSummary("Topup/Extra", `+${formatRM(order.topup)}`); if (order.topupReason) add(`  (${order.topupReason})`); }
   if (order.deliveryCharge > 0) addSummary("Caj Penghantaran", formatRM(order.deliveryCharge));
   bytes.push(ESC, 0x45, 0x01);
   addSummary("JUMLAH", formatRM(order.total));
@@ -369,6 +369,10 @@ export default function App() {
   const [cashIn, setCashIn] = useState("");
   const [discountInput, setDiscountInput] = useState("");
   const [topupInput, setTopupInput] = useState("");
+  const [discountReason, setDiscountReason] = useState("");
+  const [topupReason, setTopupReason] = useState("");
+  const [clearReportModal, setClearReportModal] = useState(false);
+  const [clearReportPw, setClearReportPw] = useState("");
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [lastOrder, setLastOrder] = useState(null);
 
@@ -922,7 +926,9 @@ export default function App() {
     const paidOrder = {
       ...order,
       discount,
+      discountReason: discountReason.trim(),
       topup,
+      topupReason: topupReason.trim(),
       total: finalTotal,
       method: payMethod,
       cash: parseFloat(cashIn) || 0,
@@ -1989,6 +1995,28 @@ export default function App() {
         </div>
       )}
 
+      {/* ── CLEAR REPORT MODAL ── */}
+      {clearReportModal && (
+        <div style={S.modal} onClick={() => setClearReportModal(false)}>
+          <div style={{ ...S.mbox, maxWidth: 340 }} onClick={e => e.stopPropagation()}>
+            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 4 }}>🗑️ Clear Sales Report</div>
+            <div style={{ fontSize: 12, color: "#ef4444", marginBottom: 16 }}>Amaran: Semua rekod jualan akan dipadam. Tindakan ini tidak boleh dibatalkan.</div>
+            <label style={S.lbl}>Masukkan Password</label>
+            <input type="password" value={clearReportPw} onChange={e => setClearReportPw(e.target.value)} placeholder="Password" style={{ ...S.inp, letterSpacing: 4, textAlign: "center", fontSize: 18 }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+              <button onClick={() => setClearReportModal(false)} style={{ flex: 1, padding: 12, background: "#f1f5f9", border: "none", borderRadius: 8, color: "#64748b", cursor: "pointer", fontWeight: 600 }}>Batal</button>
+              <button onClick={() => {
+                if (clearReportPw !== "0000") { toast("❌ Password salah!", "#ef4444"); return; }
+                setSalesHistory([]);
+                setClearReportModal(false);
+                setClearReportPw("");
+                toast("✅ Report dipadam!", "#22c55e");
+              }} style={{ flex: 1, padding: 12, background: "#ef4444", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, cursor: "pointer" }}>Confirm Padam</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MOVE TABLE MODAL (Pindah Meja) ── */}
       {moveTableModal && (
         <div style={S.modal} onClick={() => { setMoveTableModal(false); setMoveSourceKey(null); }}>
@@ -2047,11 +2075,13 @@ export default function App() {
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>🏷️ Diskaun (RM) — optional</label>
-              <input type="number" value={discountInput} onChange={e => setDiscountInput(e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 0 }} />
+              <input type="number" value={discountInput} onChange={e => setDiscountInput(e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 4 }} />
+              {(parseFloat(discountInput) || 0) > 0 && <input value={discountReason} onChange={e => setDiscountReason(e.target.value)} placeholder="Sebab diskaun (cth: regular customer)" style={{ ...S.inp, marginBottom: 0, fontSize: 12 }} />}
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>➕ Topup / Extra Caj (RM) — optional</label>
-              <input type="number" value={topupInput} onChange={e => setTopupInput(e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 0 }} />
+              <input type="number" value={topupInput} onChange={e => setTopupInput(e.target.value)} placeholder="0.00" style={{ ...S.inp, marginBottom: 4 }} />
+              {(parseFloat(topupInput) || 0) > 0 && <input value={topupReason} onChange={e => setTopupReason(e.target.value)} placeholder="Sebab caj tambahan (cth: delivery jauh)" style={{ ...S.inp, marginBottom: 0, fontSize: 12 }} />}
             </div>
             <div style={{ marginBottom: 12 }}>
               <label style={S.lbl}>Kaedah Bayaran</label>
@@ -2311,7 +2341,7 @@ export default function App() {
                           </button>
                         ) : (
                           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                            <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); setTopupInput(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                            <button onClick={() => { setSelectedTable({ id: oKey, name: order.displayName || order.tableNo }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); setTopupInput(""); setDiscountReason(""); setTopupReason(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                             <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
                             <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                             <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
@@ -2379,7 +2409,7 @@ export default function App() {
                         </button>
                       ) : (
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 5 }}>
-                          <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); setTopupInput(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
+                          <button onClick={() => { setSelectedTable({ id: oKey, name: `Order #${order.num}` }); setShowPayModal(true); setCashIn(""); setPayMethod("cash"); setDiscountInput(""); setTopupInput(""); setDiscountReason(""); setTopupReason(""); }} style={{ padding: "7px 4px", background: "#22c55e", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>💳 Bayar</button>
                           <button onClick={() => openEditOrder(oKey)} style={{ padding: "7px 4px", background: "#3b82f6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>✏️ Edit</button>
                           <button onClick={() => startMoveTable(oKey)} style={{ padding: "7px 4px", background: "#06b6d4", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>↔️ Pindah</button>
                           <button onClick={() => startMerge(oKey)} style={{ padding: "7px 4px", background: "#8b5cf6", border: "none", borderRadius: 7, color: "#fff", fontWeight: 700, fontSize: 11, cursor: "pointer" }}>🔗 Merge</button>
@@ -2450,7 +2480,10 @@ export default function App() {
                       {histDetail?.id === o.id && (
                         <div style={{ marginTop: 10, borderTop: "1px solid #f1f5f9", paddingTop: 10 }}>
                           {o.cart.map(i => <div key={i._key} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 3, color: "#1e293b" }}><span>{i.emoji} {i.name} x{i.qty}</span><span>{formatRM(i.price * i.qty)}</span></div>)}
+                          {(o.discount || 0) > 0 && <div style={{ fontSize: 12, color: "#ef4444" }}>Diskaun: -{formatRM(o.discount)}{o.discountReason ? ` (${o.discountReason})` : ""}</div>}
+                          {(o.topup || 0) > 0 && <div style={{ fontSize: 12, color: "#8b5cf6" }}>Topup: +{formatRM(o.topup)}{o.topupReason ? ` (${o.topupReason})` : ""}</div>}
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 700, marginTop: 6, paddingTop: 6, borderTop: "1px solid #f1f5f9", color: "#1e293b" }}><span>Kaedah: {o.method}</span><span>{formatRM(o.total)}</span></div>
+                          <button onClick={async e => { e.stopPropagation(); await printReceipt(o); toast("✅ Resit diprint!", "#4ade80"); }} style={{ width: "100%", marginTop: 10, padding: "8px 0", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>🧾 Reprint Resit</button>
                         </div>
                       )}
                     </div>
@@ -2468,6 +2501,7 @@ export default function App() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <div style={{ fontSize: 20, fontWeight: 700, color: "#1e293b" }}>📊 Sales Report</div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={() => { setClearReportPw(""); setClearReportModal(true); }} style={{ padding: "8px 16px", background: "#fef2f2", border: "1px solid #ef4444", borderRadius: 8, color: "#ef4444", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>🗑️ Clear Report</button>
               <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, color: "#64748b", cursor: "pointer" }}>
                 <input type="checkbox" checked={salesPrintItems} onChange={e => setSalesPrintItems(e.target.checked)} />
                 Sertakan Item
@@ -2579,7 +2613,7 @@ export default function App() {
                   <div style={{ fontSize: 18, fontWeight: 700, color: "#1e293b" }}>🍽️ Pengurusan Menu</div>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button onClick={openAddItem} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Item</button>
-                    <button onClick={openAddCombo} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#000", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Set</button>
+                    {/* <button onClick={openAddCombo} style={{ padding: "8px 16px", background: "#f59e0b", border: "none", borderRadius: 8, color: "#000", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Set</button> */}
                     <button onClick={exportMenuCSV} style={{ padding: "8px 16px", background: "#10b981", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📤 Export</button>
                     <button onClick={() => setImportModal(true)} style={{ padding: "8px 16px", background: "#6366f1", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>📥 Import</button>
                     <button onClick={async () => {
@@ -2692,10 +2726,16 @@ export default function App() {
                   <button onClick={openAddCat} style={{ padding: "8px 16px", background: "#3b82f6", border: "none", borderRadius: 8, color: "#fff", fontWeight: 600, fontSize: 13, cursor: "pointer" }}>+ Tambah Kategori</button>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  {categories.map(cat => (
+                  {categories.map((cat, idx) => (
                     <div key={cat.id} style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, overflow: "hidden" }}>
                       <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                        <div style={{ fontWeight: 700, color: "#1e293b" }}>{cat.name} <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400 }}>({cat.subcategories.length} sub · {products.filter(p => p.categoryId === cat.id).length} item)</span></div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                            <button onClick={() => { if (idx === 0) return; const c = [...categories]; [c[idx-1], c[idx]] = [c[idx], c[idx-1]]; setCategories(c); }} disabled={idx === 0} style={{ background: "none", border: "none", cursor: idx === 0 ? "not-allowed" : "pointer", color: idx === 0 ? "#e2e8f0" : "#64748b", fontSize: 12, lineHeight: 1, padding: 0 }}>▲</button>
+                            <button onClick={() => { if (idx === categories.length - 1) return; const c = [...categories]; [c[idx], c[idx+1]] = [c[idx+1], c[idx]]; setCategories(c); }} disabled={idx === categories.length - 1} style={{ background: "none", border: "none", cursor: idx === categories.length - 1 ? "not-allowed" : "pointer", color: idx === categories.length - 1 ? "#e2e8f0" : "#64748b", fontSize: 12, lineHeight: 1, padding: 0 }}>▼</button>
+                          </div>
+                          <div style={{ fontWeight: 700, color: "#1e293b" }}>{cat.name} <span style={{ fontSize: 12, color: "#94a3b8", fontWeight: 400 }}>({cat.subcategories.length} sub · {products.filter(p => p.categoryId === cat.id).length} item)</span></div>
+                        </div>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => openAddSub(cat.id)} style={{ padding: "5px 10px", background: "#f0fdf4", border: "none", borderRadius: 6, color: "#22c55e", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>+ Sub</button>
                           <button onClick={() => openEditCat(cat)} style={{ padding: "5px 9px", background: "#eff6ff", border: "none", borderRadius: 6, color: "#3b82f6", cursor: "pointer" }}>✏️</button>
